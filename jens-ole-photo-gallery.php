@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Jens Ole Photo Gallery
  * Description: Custom photo gallery with Lightroom sync, watermarking, WooCommerce sales, and client selection.
- * Version: 1.1.0
+ * Version: 1.1.1
  * Author: Jens Ole Photography
  * Text Domain: jopg
  * Requires at least: 6.0
@@ -12,7 +12,7 @@
 
 if (!defined('ABSPATH')) exit;
 
-define('JOPG_VERSION', '1.1.0');
+define('JOPG_VERSION', '1.1.1');
 define('JOPG_PATH', plugin_dir_path(__FILE__));
 define('JOPG_URL', plugin_dir_url(__FILE__));
 define('JOPG_DB_VERSION', '1.0');
@@ -55,6 +55,17 @@ class Jens_Ole_Photo_Gallery {
         JOPG_Admin::instance();
         JOPG_Shortcodes::instance();
         JOPG_Updater::instance();
+        
+        // WordPress does NOT fire register_activation_hook when a plugin is
+        // updated via "Update now" / auto-update — only on manual activation.
+        // Our custom rewrite rules (image proxy, OAuth callback, client selection)
+        // need flushing whenever the plugin version changes, or the rules can go
+        // stale after an update and cause 404s on all image/proxy URLs.
+        $flushed_version = get_option('jopg_flushed_version', '');
+        if ($flushed_version !== JOPG_VERSION) {
+            flush_rewrite_rules();
+            update_option('jopg_flushed_version', JOPG_VERSION);
+        }
     }
 }
 

@@ -517,17 +517,40 @@ class JOPG_Lightroom {
         $token = $this->get_access_token();
         if (is_wp_error($token)) return $token;
         
+        // IMPORTANT: Adobe's rendition endpoint replies with a 3xx redirect to a
+        // pre-signed storage URL (e.g. S3) for the actual image bytes. We must NOT
+        // let the HTTP client auto-follow that redirect while re-sending our
+        // Authorization/x-api-key headers — the storage backend rejects requests
+        // carrying an unexpected Authorization header (signature mismatch).
+        // So: disable auto-redirect on the authenticated request, then follow the
+        // Location manually with a clean, unauthenticated request.
         $response = wp_remote_get($rendition_url, [
             'headers' => [
                 'Authorization' => 'Bearer ' . $token,
                 'x-api-key' => $this->client_id,
             ],
-            'timeout' => 60
+            'timeout' => 60,
+            'redirection' => 0, // don't auto-follow — handle manually below
         ]);
         
         if (is_wp_error($response)) return $response;
         
         $code = wp_remote_retrieve_response_code($response);
+        
+        // Follow redirect manually, WITHOUT forwarding auth headers
+        if ($code >= 300 && $code < 400) {
+            $location = wp_remote_retrieve_header($response, 'location');
+            if (!$location) {
+                return new WP_Error('fetch_failed', "Rendition redirect ($code) had no Location header");
+            }
+            $response = wp_remote_get($location, [
+                'timeout' => 60,
+                'redirection' => 3,
+            ]);
+            if (is_wp_error($response)) return $response;
+            $code = wp_remote_retrieve_response_code($response);
+        }
+        
         if ($code >= 400) {
             return new WP_Error('fetch_failed', "Rendition fetch returned $code");
         }
