@@ -60,7 +60,11 @@ class JOPG_Watermark {
         
         // Serve from cache if fresh (24h)
         if (file_exists($cache_file) && (time() - filemtime($cache_file)) < DAY_IN_SECONDS) {
-            return ['body' => file_get_contents($cache_file), 'content_type' => 'image/jpeg'];
+            $cached_data = file_get_contents($cache_file);
+            if ($cached_data && strlen($cached_data) > 100) {
+                return ['body' => $cached_data, 'content_type' => 'image/jpeg'];
+            }
+            // Cache file is too small/empty — probably a failed fetch, ignore it
         }
         
         $lr = JOPG_Lightroom::instance();
@@ -76,12 +80,11 @@ class JOPG_Watermark {
     
     private function serve_watermarked($photo) {
         $url = $photo->display_url ?: $photo->original_url;
-        if (!$url) { status_header(404); exit; }
+        if (!$url) { $this->error_image('No URL stored for photo #' . $photo->id); exit; }
         
         $result = $this->get_source_bytes($url, 'wm_' . $photo->id);
         if (is_wp_error($result)) { 
-            status_header(502); 
-            echo 'Could not load image from Lightroom: ' . esc_html($result->get_error_message());
+            $this->error_image('Lightroom fetch failed: ' . $result->get_error_message() . '\nURL: ' . substr($url, 0, 100));
             exit; 
         }
         
@@ -143,6 +146,51 @@ class JOPG_Watermark {
         header('Content-Length: ' . strlen($result['body']));
         echo $result['body'];
         exit;
+    }
+    
+    /**
+     * Generate an error image with text so the browser shows what went wrong
+     * instead of a blank broken-image icon.
+     */
+    private function error_image($message) {
+        $w = 600;
+        $h = 200;
+        $img = imagecreatetruecolor($w, $h);
+        $bg = imagecolorallocate($img, 40, 40, 40);
+        $red = imagecolorallocate($img, 255, 80, 80);
+        $white = imagecolorallocate($img, 220, 220, 220);
+        imagefill($img, 0, 0, $bg);
+        
+        // Red header
+        imagefilledrectangle($img, 0, 0, $w, 30, $red);
+        imagestring($img, 3, 10, 10, 'JOPG Image Error', $white);
+        
+        // Word-wrap the message
+        $lines = explode("\n", $message);
+        $y = 45;
+        foreach ($lines as $line) {
+            $words = explode(' ', $line);
+            $current = '';
+            foreach ($words as $word) {
+                $test = $current ? $current . ' ' . $word : $word;
+                if (strlen($test) * 6 > $w - 20) {
+                    imagestring($img, 2, 10, $y, $current, $white);
+                    $y += 18;
+                    $current = $word;
+                } else {
+                    $current = $test;
+                }
+            }
+            if ($current) {
+                imagestring($img, 2, 10, $y, $current, $white);
+                $y += 18;
+            }
+        }
+        
+        header('Content-Type: image/jpeg');
+        header('Cache-Control: no-store, no-cache');
+        imagejpeg($img, null, 80);
+        imagedestroy($img);
     }
     
     private function apply_watermark($image) {

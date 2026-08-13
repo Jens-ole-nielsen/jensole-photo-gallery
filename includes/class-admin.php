@@ -31,6 +31,7 @@ class JOPG_Admin {
         add_submenu_page('jopg', 'Settings', 'Settings', 'manage_options', 'jopg-settings', [$this, 'render_settings_page']);
         add_submenu_page('jopg', 'Client Selections', 'Client Selections', 'manage_options', 'jopg-selections', [$this, 'render_selections_page']);
         add_submenu_page('jopg', 'Lightroom Sync', 'Lightroom Sync', 'manage_options', 'jopg-sync', [$this, 'render_sync_page']);
+        add_submenu_page('jopg', 'Diagnostics', 'Diagnostics', 'manage_options', 'jopg-diagnostics', [$this, 'render_diagnostics_page']);
     }
     
     public function enqueue_admin_assets($hook) {
@@ -495,16 +496,165 @@ class JOPG_Admin {
         </div>
         <?php
     }
-}
-
-// Add custom cron schedule
-add_filter('cron_schedules', function($schedules) {
-    $interval = intval(JOPG_DB::get_setting('sync_interval', '6'));
-    if (!isset($schedules["every_{$interval}_hours"])) {
-        $schedules["every_{$interval}_hours"] = [
-            'interval' => $interval * HOUR_IN_SECONDS,
-            'display' => "Every {$interval} hours"
+    
+    /**
+     * Diagnostics page — shows system status and lets you test image fetching
+     */
+    public function render_diagnostics_page() {
+        global $wpdb;
+        $table_photos = $wpdb->prefix . 'jopg_photos';
+        $table_albums = $wpdb->prefix . 'jopg_albums';
+        
+        $diagnostics = [];
+        
+        // 1. Check Adobe connection
+        $access_token = JOPG_DB::get_setting('adobe_access_token', '');
+        $refresh_token = JOPG_DB::get_setting('adobe_refresh_token', '');
+        $token_expires = intval(JOPG_DB::get_setting('adobe_token_expires', 0));
+        $catalog_base = JOPG_DB::get_setting('adobe_catalog_base', '');
+        $client_id = JOPG_DB::get_setting('adobe_client_id', '');
+        
+        $diagnostics[] = [
+            'label' => 'Adobe Connection',
+            'value' => $refresh_token ? 'Connected (refresh token present)' : 'NOT CONNECTED',
+            'ok' => (bool)$refresh_token,
         ];
+        $diagnostics[] = [
+            'label' => 'Access Token',
+            'value' => $access_token ? 'Present, expires ' . date('Y-m-d H:i:s', $token_expires) . ' (' . ($token_expires > time() ? 'valid' : 'EXPIRED') . ')' : 'Missing',
+            'ok' => $access_token && $token_expires > time(),
+        ];
+        $diagnostics[] = [
+            'label' => 'Client ID',
+            'value' => $client_id ?: 'MISSING',
+            'ok' => (bool)$client_id,
+        ];
+        $diagnostics[] = [
+            'label' => 'Catalog Base URL',
+            'value' => $catalog_base ?: 'NOT SET (will use default lr.adobe.io)',
+            'ok' => (bool)$catalog_base,
+        ];
+        
+        // 2. Check database tables
+        $album_count = intval($wpdb->get_var("SELECT COUNT(*) FROM $table_albums"));
+        $photo_count = intval($wpdb->get_var("SELECT COUNT(*) FROM $table_photos"));
+        $photos_with_url = intval($wpdb->get_var("SELECT COUNT(*) FROM $table_photos WHERE display_url IS NOT NULL AND display_url != ''"));
+        
+        $diagnostics[] = [
+            'label' => 'Albums in DB',
+            'value' => $album_count . ' albums',
+            'ok' => $album_count > 0,
+        ];
+        $diagnostics[] = [
+            'label' => 'Photos in DB',
+            'value' => $photo_count . ' photos (' . $photos_with_url . ' with URL)',
+            'ok' => $photo_count > 0,
+        ];
+        
+        // 3. Check rewrite rules
+        $rules = get_option('rewrite_rules');
+        $jopg_rules = 0;
+        if (is_array($rules)) {
+            foreach ($rules as $pattern => $target) {
+                if (strpos($pattern, 'jopg') !== false) $jopg_rules++;
+            }
+        }
+        $diagnostics[] = [
+            'label' => 'Rewrite Rules',
+            'value' => $jopg_rules . ' JOPG rules found (need 2)',
+            'ok' => $jopg_rules >= 2,
+        ];
+        
+        // 4. Show a sample photo URL
+        $sample_photo = $wpdb->get_row("SELECT * FROM $table_photos ORDER BY id ASC LIMIT 1");
+        if ($sample_photo) {
+            $wm_url = JOPG_Watermark::get_watermarked_url($sample_photo->id);
+            $diagnostics[] = [
+                'label' => 'Sample Photo (#' . $sample_photo->id . ')',
+                'value' => $sample_photo->filename . ' — display_url: ' . substr($sample_photo->display_url ?: '(empty)', 0, 120),
+                'ok' => (bool)$sample_photo->display_url,
+            ];
+            $diagnostics[] = [
+                'label' => 'Watermark Proxy URL',
+                'value' => $wm_url,
+                'ok' => true,
+            ];
+        }
+        
+        // 5. Test image fetch (if we have a photo)
+        $fetch_result = '';
+        $fetch_ok = false;
+        if (isset($_GET['test_fetch']) && $sample_photo) {
+            $lr = JOPG_Lightroom::instance();
+            $test_url = $sample_photo->display_url ?: $sample_photo->original_url;
+            
+            // Test token first
+            $token = $lr->get_access_token();
+            if (is_wp_error($token)) {
+                $fetch_result = 'Token error: ' . $token->get_error_message();
+            } else {
+                $fetch_result = 'Token OK (expires ' . date('H:i:s', intval(JOPG_DB::get_setting('adobe_token_expires', 0))) . '). ';
+                $result = $lr->fetch_rendition_bytes($test_url);
+                if (is_wp_error($result)) {
+                    $fetch_result .= 'Fetch FAILED: ' . $result->get_error_message();
+                } else {
+                    $size = strlen($result['body']);
+                    $fetch_result .= 'Fetch OK — ' . $size . ' bytes, content-type: ' . $result['content_type'];
+                    $fetch_ok = $size > 1000;
+                }
+            }
+        }
+        
+        ?>
+        <div class="wrap jopg-admin">
+            <h1>🔧 Diagnostics</h1>
+            
+            <table class="wp-list-table widefat striped">
+                <thead>
+                    <tr>
+                        <th style="width:25%;">Check</th>
+                        <th>Result</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <?php foreach ($diagnostics as $diag): ?>
+                        <tr>
+                            <td><strong><?php echo esc_html($diag['label']); ?></strong></td>
+                            <td style="color: <?php echo $diag['ok'] ? '#0a8028' : '#c00'; ?>;">
+                                <?php echo esc_html($diag['value']); ?>
+                                <?php echo $diag['ok'] ? ' ✓' : ' ✗'; ?>
+                            </td>
+                        </tr>
+                    <?php endforeach; ?>
+                </tbody>
+            </table>
+            
+            <?php if ($sample_photo): ?>
+                <h2 style="margin-top:30px;">Test Image Fetch</h2>
+                <p>Click the button below to test fetching an image from Adobe Lightroom.</p>
+                <a href="<?php echo admin_url('admin.php?page=jopg-diagnostics&test_fetch=1'); ?>" class="button button-primary">Test Fetch First Photo</a>
+                
+                <?php if ($fetch_result): ?>
+                    <div style="margin-top:15px; padding:15px; background:<?php echo $fetch_ok ? '#d4edda' : '#f8d7da'; ?>; border-radius:4px; font-family:monospace; font-size:13px;">
+                        <?php echo esc_html($fetch_result); ?>
+                    </div>
+                <?php endif; ?>
+                
+                <h2 style="margin-top:30px;">Sample Watermarked Image</h2>
+                <p>If the proxy works, you should see a watermarked image below. If you see an error image, the error text will tell you what is wrong.</p>
+                <img src="<?php echo esc_url(JOPG_Watermark::get_watermarked_url($sample_photo->id)); ?>" 
+                     style="max-width:400px; border:1px solid #ddd; border-radius:4px;" 
+                     alt="Test image">
+            <?php else: ?>
+                <p>No photos found in the database. Import photos from an album first.</p>
+            <?php endif; ?>
+            
+            <h2 style="margin-top:30px;">Actions</h2>
+            <p>
+                <a href="<?php echo admin_url('admin.php?page=jopg&action=check_updates'); ?>" class="button">🔄 Check for Plugin Updates</a>
+                <a href="<?php echo admin_url('options-permalink.php'); ?>" class="button">📝 Go to Permalink Settings (just click Save to flush rewrite rules)</a>
+            </p>
+        </div>
+        <?php
     }
-    return $schedules;
-});
+}
