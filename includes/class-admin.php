@@ -105,6 +105,18 @@ class JOPG_Admin {
         $table_albums = $wpdb->prefix . 'jopg_albums';
         $table_photos = $wpdb->prefix . 'jopg_photos';
         
+        // Handle "Check for Updates"
+        if (isset($_GET['action']) && $_GET['action'] === 'check_updates') {
+            delete_transient('jopg_github_release');
+            // Force WordPress to re-check plugins
+            delete_site_transient('update_plugins');
+            // Trigger WordPress's update check
+            wp_update_plugins();
+            add_action('admin_notices', function() {
+                echo '<div class="notice notice-success is-dismissible"><p>Checked for plugin updates. If a new version is available it will appear below — or go to Plugins page.</p></div>';
+            });
+        }
+        
         // Handle "View Photos" for a specific album
         if (isset($_GET['action']) && $_GET['action'] === 'view_album' && isset($_GET['album_id'])) {
             $this->render_album_photos(intval($_GET['album_id']));
@@ -122,6 +134,7 @@ class JOPG_Admin {
             
             <div class="jopg-actions">
                 <button class="button button-primary" id="jopg-sync-now">🔄 Sync Albums from Lightroom</button>
+                <a href="<?php echo admin_url('admin.php?page=jopg&action=check_updates'); ?>" class="button">🔄 Check for Plugin Updates</a>
             </div>
             
             <?php if (empty($albums)): ?>
