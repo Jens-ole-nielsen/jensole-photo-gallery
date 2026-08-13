@@ -1,0 +1,352 @@
+/* Jens Ole Photo Gallery — Frontend Styles */
+
+/* Gallery Grid */
+.jopg-gallery-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+    gap: 24px;
+    padding: 20px 0;
+}
+
+.jopg-album-card {
+    cursor: pointer;
+    border-radius: 8px;
+    overflow: hidden;
+    background: #1a1a1a;
+    transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.jopg-album-card:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 8px 24px rgba(0,0,0,0.3);
+}
+
+.jopg-album-cover {
+    aspect-ratio: 3/2;
+    overflow: hidden;
+}
+
+.jopg-album-cover img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+}
+
+.jopg-no-cover {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    background: #333;
+    font-size: 48px;
+}
+
+.jopg-album-info {
+    padding: 16px;
+}
+
+.jopg-album-info h3 {
+    margin: 0 0 4px;
+    font-size: 18px;
+    color: #fff;
+}
+
+.jopg-photo-count {
+    font-size: 13px;
+    color: #999;
+}
+
+/* Single Album Grid */
+.jopg-album-title {
+    font-size: 28px;
+    color: #fff;
+    margin-bottom: 4px;
+}
+
+.jopg-album-meta {
+    color: #999;
+    margin-bottom: 24px;
+    font-size: 14px;
+}
+
+.jopg-photos-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    gap: 12px;
+    padding-bottom: 40px;
+}
+
+.jopg-photo {
+    position: relative;
+    aspect-ratio: 3/2;
+    overflow: hidden;
+    border-radius: 6px;
+    cursor: pointer;
+    background: #1a1a1a;
+}
+
+.jopg-photo-thumb {
+    width: 100%;
+    height: 100%;
+}
+
+.jopg-photo-thumb img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    transition: transform 0.3s;
+}
+
+.jopg-photo:hover .jopg-photo-thumb img {
+    transform: scale(1.05);
+}
+
+.jopg-photo-overlay {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    background: rgba(0,0,0,0.5);
+    opacity: 0;
+    transition: opacity 0.2s;
+}
+
+.jopg-photo:hover .jopg-photo-overlay {
+    opacity: 1;
+}
+
+.jopg-add-cart {
+    background: #1f7a96;
+    color: #fff;
+    border: none;
+    padding: 10px 20px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 14px;
+    font-weight: 600;
+    transition: background 0.2s;
+}
+
+.jopg-add-cart:hover {
+    background: #155a73;
+}
+
+.jopg-price {
+    color: #fff;
+    font-size: 13px;
+    font-weight: 500;
+}
+
+.jopg-add-cart.jopg-added {
+    background: #2a8f4a;
+    pointer-events: none;
+}
+
+/* Lightbox */
+.jopg-lightbox {
+    position: fixed;
+    inset: 0;
+    z-index: 99999;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.jopg-lightbox-bg {
+    position: absolute;
+    inset: 0;
+    background: rgba(0,0,0,0.95);
+}
+
+.jopg-lightbox-content {
+    position: relative;
+    max-width: 90vw;
+    max-height: 90vh;
+}
+
+.jopg-lightbox-content img {
+    max-width: 90vw;
+    max-height: 80vh;
+    object-fit: contain;
+    display: block;
+}
+
+.jopg-lightbox-controls {
+    position: absolute;
+    right: -60px;
+    top: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.jopg-lightbox-controls button {
+    width: 44px;
+    height: 44px;
+    border-radius: 50%;
+    border: none;
+    background: #2a2a2a;
+    color: #fff;
+    cursor: pointer;
+    font-size: 18px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.2s;
+}
+
+.jopg-lightbox-controls button:hover {
+    background: #3a3a3a;
+}
+
+.jopg-lb-cart {
+    background: #1f7a96 !important;
+}
+
+.jopg-lb-cart:hover {
+    background: #155a73 !important;
+}
+
+/* Cart notification */
+.jopg-cart-notice {
+    position: fixed;
+    bottom: 20px;
+    right: 20px;
+    background: #1f7a96;
+    color: #fff;
+    padding: 16px 24px;
+    border-radius: 8px;
+    z-index: 100000;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+    animation: jopg-slide-in 0.3s ease;
+}
+
+@keyframes jopg-slide-in {
+    from { transform: translateX(100px); opacity: 0; }
+    to { transform: translateX(0); opacity: 1; }
+}
+
+/* Client Selection */
+.jopg-selection-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 10px;
+    padding: 20px 0;
+}
+
+.jopg-selection-photo {
+    position: relative;
+    aspect-ratio: 3/2;
+    overflow: hidden;
+    border-radius: 6px;
+    cursor: pointer;
+}
+
+.jopg-selection-photo img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.jopg-selection-photo .jopg-select-check {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    background: rgba(0,0,0,0.6);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #fff;
+    font-size: 18px;
+    border: 2px solid transparent;
+    transition: all 0.2s;
+}
+
+.jopg-selection-photo.selected .jopg-select-check {
+    background: #1f7a96;
+    border-color: #fff;
+}
+
+.jopg-selection-actions {
+    position: sticky;
+    bottom: 0;
+    background: rgba(26,26,26,0.95);
+    padding: 16px;
+    text-align: center;
+    border-top: 1px solid #333;
+}
+
+.jopg-selection-actions button {
+    background: #1f7a96;
+    color: #fff;
+    border: none;
+    padding: 14px 40px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 16px;
+    font-weight: 600;
+}
+
+.jopg-selection-count {
+    color: #fff;
+    margin-bottom: 8px;
+    font-size: 14px;
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+    .jopg-photos-grid {
+        grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+        gap: 8px;
+    }
+    
+    .jopg-lightbox-controls {
+        right: 10px;
+        top: auto;
+        bottom: 10px;
+        flex-direction: row;
+    }
+    
+    .jopg-gallery-grid {
+        grid-template-columns: 1fr 1fr;
+        gap: 12px;
+    }
+}
+
+
+/* Back link */
+.jopg-back-link {
+    margin-bottom: 16px;
+}
+
+.jopg-back-link a {
+    color: #666;
+    text-decoration: none;
+    font-size: 14px;
+}
+
+.jopg-back-link a:hover {
+    color: #000;
+}
+
+/* Gallery title */
+.jopg-gallery-header {
+    margin-bottom: 24px;
+}
+
+.jopg-gallery-header h1 {
+    font-size: 32px;
+    margin-bottom: 4px;
+}
+
+.jopg-gallery-header p {
+    color: #666;
+    font-size: 15px;
+}

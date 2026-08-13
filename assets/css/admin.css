@@ -1,0 +1,42 @@
+/* Jens Ole Photo Gallery — Admin Styles */
+
+.jopg-admin .jopg-actions {
+    margin: 20px 0;
+}
+
+.jopg-admin .jopg-empty {
+    padding: 40px;
+    text-align: center;
+    background: #fff;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+}
+
+.jopg-admin .jopg-sync-status {
+    margin: 20px 0;
+}
+
+.jopg-admin .jopg-sync-actions {
+    margin: 20px 0;
+}
+
+#jopg-sync-result {
+    margin-left: 10px;
+    font-weight: 600;
+}
+
+#jopg-sync-result.syncing {
+    color: #2271b1;
+}
+
+#jopg-sync-result.success {
+    color: #00a32a;
+}
+
+#jopg-sync-result.error {
+    color: #d63638;
+}
+
+.jopg-admin .button-small {
+    margin-right: 4px;
+}
