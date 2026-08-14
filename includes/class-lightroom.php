@@ -340,24 +340,40 @@ class JOPG_Lightroom {
     }
     
     /**
-     * Lightweight check: does this album have at least one asset?
-     * Uses limit=1 and does NOT paginate — much cheaper than get_album_assets()
-     * which fetches every asset with embed=asset. Used only to decide whether
-     * to skip an empty album during sync.
-     * Returns: WP_Error on failure, false if empty, or int count if available.
+     * Count assets in an album — lightweight (no embed=asset, just asset references).
+     * Paginates through all pages to get an accurate count.
+     * Much faster than get_album_assets() because it doesn't embed full asset data.
      */
-    public function album_has_assets($catalog_id, $album_id) {
+    public function count_album_assets($catalog_id, $album_id) {
         $catalog_base = $this->get_catalog_base();
         $assets_path = "catalogs/$catalog_id/albums/$album_id/assets";
-        $url = $this->resolve_url($catalog_base, $assets_path . "?limit=1");
-        $result = $this->api_call($url);
-        if (is_wp_error($result)) return $result;
-        if (empty($result['resources'])) return false;
-        // Some API responses include a total count
-        $count = $result['total'] ?? $result['count'] ?? null;
-        if ($count !== null) return intval($count);
-        // Otherwise just return 1 (at least one asset)
-        return 1;
+        $next = $this->resolve_url($catalog_base, $assets_path . "?limit=100");
+        $count = 0;
+        $pages = 0;
+        $max_pages = 50; // safety limit
+        
+        do {
+            $result = $this->api_call($next);
+            if (is_wp_error($result)) return $result;
+            
+            if (isset($result['resources'])) {
+                $count += count($result['resources']);
+            }
+            
+            $next = null;
+            if (isset($result['links']['next']['href'])) {
+                $href = $result['links']['next']['href'];
+                $query = '';
+                $qpos = strpos($href, '?');
+                if ($qpos !== false) {
+                    $query = substr($href, $qpos);
+                }
+                $next = $this->resolve_url($catalog_base, $assets_path . $query);
+            }
+            $pages++;
+        } while ($next && $pages < $max_pages);
+        
+        return $count;
     }
     
     /**
@@ -451,17 +467,18 @@ class JOPG_Lightroom {
                 continue; // Empty album — skip
             }
             
-            // If assetCount is not in the payload, do a quick lightweight check (limit=1, no pagination)
+            // If assetCount is not in the payload, count assets (lightweight — no embed=asset)
             if ($asset_count === null) {
-                $has_assets = $this->album_has_assets($catalog_id, $lr_id);
-                if (is_wp_error($has_assets) || !$has_assets) {
+                $count = $this->count_album_assets($catalog_id, $lr_id);
+                if (is_wp_error($count)) {
                     $skipped_empty++;
-                    continue; // Empty or error — skip
+                    continue; // Error — skip
                 }
-                // album_has_assets returns count if available, or 1 if at least one
-                if (is_int($has_assets) && $has_assets > 1) {
-                    $asset_count = $has_assets;
+                if ($count === 0) {
+                    $skipped_empty++;
+                    continue; // Empty album — skip
                 }
+                $asset_count = $count;
             }
             
             $slug = sanitize_title($title) . '-' . substr($lr_id, -6);
