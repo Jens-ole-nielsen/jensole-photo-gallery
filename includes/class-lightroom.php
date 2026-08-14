@@ -340,6 +340,21 @@ class JOPG_Lightroom {
     }
     
     /**
+     * Lightweight check: does this album have at least one asset?
+     * Uses limit=1 and does NOT paginate — much cheaper than get_album_assets()
+     * which fetches every asset with embed=asset. Used only to decide whether
+     * to skip an empty album during sync.
+     */
+    public function album_has_assets($catalog_id, $album_id) {
+        $catalog_base = $this->get_catalog_base();
+        $assets_path = "catalogs/$catalog_id/albums/$album_id/assets";
+        $url = $this->resolve_url($catalog_base, $assets_path . "?limit=1");
+        $result = $this->api_call($url);
+        if (is_wp_error($result)) return $result;
+        return !empty($result['resources']);
+    }
+    
+    /**
      * Get assets (photos) in an album
      */
     public function get_album_assets($catalog_id, $album_id) {
@@ -395,6 +410,12 @@ class JOPG_Lightroom {
      * Sync all albums from Lightroom
      */
     public function sync_all_albums() {
+        // Safety net: with many albums, the per-album empty-check loop can take a while.
+        // Raise the execution time limit for this request (works unless host disables it).
+        if (function_exists('set_time_limit')) {
+            @set_time_limit(120);
+        }
+        
         $catalog = $this->get_catalog();
         if (is_wp_error($catalog)) return $catalog;
         
@@ -424,10 +445,10 @@ class JOPG_Lightroom {
                 continue; // Empty album — skip
             }
             
-            // If assetCount is not in the payload, do a quick API check
+            // If assetCount is not in the payload, do a quick lightweight check (limit=1, no pagination)
             if ($asset_count === null) {
-                $assets_check = $this->get_album_assets($catalog_id, $lr_id);
-                if (is_wp_error($assets_check) || empty($assets_check)) {
+                $has_assets = $this->album_has_assets($catalog_id, $lr_id);
+                if (is_wp_error($has_assets) || !$has_assets) {
                     $skipped_empty++;
                     continue; // Empty or error — skip
                 }
