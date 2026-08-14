@@ -344,6 +344,7 @@ class JOPG_Lightroom {
      * Uses limit=1 and does NOT paginate — much cheaper than get_album_assets()
      * which fetches every asset with embed=asset. Used only to decide whether
      * to skip an empty album during sync.
+     * Returns: WP_Error on failure, false if empty, or int count if available.
      */
     public function album_has_assets($catalog_id, $album_id) {
         $catalog_base = $this->get_catalog_base();
@@ -351,7 +352,12 @@ class JOPG_Lightroom {
         $url = $this->resolve_url($catalog_base, $assets_path . "?limit=1");
         $result = $this->api_call($url);
         if (is_wp_error($result)) return $result;
-        return !empty($result['resources']);
+        if (empty($result['resources'])) return false;
+        // Some API responses include a total count
+        $count = $result['total'] ?? $result['count'] ?? null;
+        if ($count !== null) return intval($count);
+        // Otherwise just return 1 (at least one asset)
+        return 1;
     }
     
     /**
@@ -452,6 +458,10 @@ class JOPG_Lightroom {
                     $skipped_empty++;
                     continue; // Empty or error — skip
                 }
+                // album_has_assets returns count if available, or 1 if at least one
+                if (is_int($has_assets) && $has_assets > 1) {
+                    $asset_count = $has_assets;
+                }
             }
             
             $slug = sanitize_title($title) . '-' . substr($lr_id, -6);
@@ -461,9 +471,10 @@ class JOPG_Lightroom {
                 'lightroom_catalog_id' => $catalog_id,
                 'title' => $title,
                 'slug' => $slug,
+                'photo_count' => intval($asset_count ?? 0),
                 'synced_at' => current_time('mysql'),
                 'status' => 'active'
-            ], ['%s', '%s', '%s', '%s', '%s', '%s']);
+            ], ['%s', '%s', '%s', '%s', '%d', '%s', '%s']);
             
             $synced++;
         }
