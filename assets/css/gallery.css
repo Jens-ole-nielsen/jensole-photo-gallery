@@ -29,7 +29,7 @@
 .jopg-album-cover img {
     width: 100%;
     height: 100%;
-    object-fit: cover;
+    object-fit: contain;
     display: block;
     background: #1a1a1a;
 }
@@ -251,7 +251,8 @@
 .jopg-selection-photo img {
     width: 100%;
     height: 100%;
-    object-fit: cover;
+    object-fit: contain;
+    background: #1a1a1a;
 }
 
 .jopg-selection-photo .jopg-select-check {

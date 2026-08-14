@@ -91,11 +91,28 @@ class JOPG_Watermark {
         }
         if (!$url) { $this->error_image('No URL stored for photo #' . $photo->id); exit; }
         
+        // Check watermarked output cache first — serve directly without GD processing
+        $upload_dir = wp_upload_dir();
+        $cache_dir = $upload_dir['basedir'] . '/jopg-cache';
+        if (!file_exists($cache_dir)) wp_mkdir_p($cache_dir);
+        
+        $out_key = $thumb ? 'wm_thumb_out_' . $photo->id : 'wm_out_' . $photo->id;
+        $out_file = $cache_dir . '/' . $out_key . '.jpg';
+        
+        if (file_exists($out_file) && (time() - filemtime($out_file)) < (7 * DAY_IN_SECONDS) && filesize($out_file) > 100) {
+            header('Content-Type: image/jpeg');
+            header('Cache-Control: public, max-age=3600');
+            header('Content-Length: ' . filesize($out_file));
+            readfile($out_file);
+            exit;
+        }
+        
+        // Not in output cache — fetch source bytes (also cached)
         $cache_key = $thumb ? 'wm_thumb_' . $photo->id : 'wm_' . $photo->id;
         $result = $this->get_source_bytes($url, $cache_key);
         if (is_wp_error($result)) { 
-            $this->error_image('Lightroom fetch failed: ' . $result->get_error_message() . '\nURL: ' . substr($url, 0, 100));
-            exit; 
+            $this->error_image('Lightroom fetch failed: ' . $result->get_error_message() . '\nURL: ' . substr($url, 0, 80));
+            exit;
         }
         
         $image_data = $result['body'];
@@ -110,9 +127,13 @@ class JOPG_Watermark {
         
         $image = $this->apply_watermark($image);
         
+        // Save to output cache so subsequent requests skip GD processing entirely
+        imagejpeg($image, $out_file, 90);
+        
         header('Content-Type: image/jpeg');
         header('Cache-Control: public, max-age=3600');
-        imagejpeg($image, null, 90);
+        header('Content-Length: ' . filesize($out_file));
+        readfile($out_file);
         imagedestroy($image);
         exit;
     }

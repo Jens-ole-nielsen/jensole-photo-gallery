@@ -483,15 +483,28 @@ class JOPG_Lightroom {
             
             $slug = sanitize_title($title) . '-' . substr($lr_id, -6);
             
-            $wpdb->replace($table_albums, [
-                'lightroom_album_id' => $lr_id,
+            // Check if album already exists — preserve the ID so imported photos keep their reference
+            $existing_id = $wpdb->get_var($wpdb->prepare(
+                "SELECT id FROM $table_albums WHERE lightroom_album_id = %s", $lr_id
+            ));
+            
+            $album_data = [
                 'lightroom_catalog_id' => $catalog_id,
                 'title' => $title,
                 'slug' => $slug,
                 'photo_count' => intval($asset_count ?? 0),
                 'synced_at' => current_time('mysql'),
                 'status' => 'active'
-            ], ['%s', '%s', '%s', '%s', '%d', '%s', '%s']);
+            ];
+            
+            if ($existing_id) {
+                // Update existing album — preserves id so jopg_photos.album_id stays valid
+                $wpdb->update($table_albums, $album_data, ['id' => $existing_id]);
+            } else {
+                // New album — insert
+                $album_data['lightroom_album_id'] = $lr_id;
+                $wpdb->insert($table_albums, $album_data);
+            }
             
             $synced++;
         }
