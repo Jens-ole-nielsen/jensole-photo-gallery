@@ -345,33 +345,25 @@ class JOPG_Lightroom {
      * Much faster than get_album_assets() because it doesn't embed full asset data.
      */
     public function count_album_assets($catalog_id, $album_id) {
+        // Single API call — no pagination. Fast, won't hang.
+        // Returns exact count if API provides it, otherwise count of first page resources.
         $catalog_base = $this->get_catalog_base();
         $assets_path = "catalogs/$catalog_id/albums/$album_id/assets";
-        $next = $this->resolve_url($catalog_base, $assets_path . "?limit=100");
-        $count = 0;
-        $pages = 0;
-        $max_pages = 50; // safety limit
+        $url = $this->resolve_url($catalog_base, $assets_path . "?limit=100");
+        $result = $this->api_call($url);
+        if (is_wp_error($result)) return $result;
         
-        do {
-            $result = $this->api_call($next);
-            if (is_wp_error($result)) return $result;
-            
-            if (isset($result['resources'])) {
-                $count += count($result['resources']);
-            }
-            
-            $next = null;
-            if (isset($result['links']['next']['href'])) {
-                $href = $result['links']['next']['href'];
-                $query = '';
-                $qpos = strpos($href, '?');
-                if ($qpos !== false) {
-                    $query = substr($href, $qpos);
-                }
-                $next = $this->resolve_url($catalog_base, $assets_path . $query);
-            }
-            $pages++;
-        } while ($next && $pages < $max_pages);
+        // Check if API provides a total count
+        if (isset($result['total'])) return intval($result['total']);
+        if (isset($result['count'])) return intval($result['count']);
+        
+        // Otherwise count resources in the first page
+        $count = isset($result['resources']) ? count($result['resources']) : 0;
+        
+        // If we got exactly 100, there are probably more — indicate 100+
+        if ($count === 100 && isset($result['links']['next']['href'])) {
+            return 100; // At least 100, exact count would need pagination
+        }
         
         return $count;
     }

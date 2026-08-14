@@ -47,16 +47,32 @@
         });
     }
 
-    $(document).on('click', '.jopg-photo-thumb img', function(e) {
+    // Open lightbox when clicking anywhere on the photo card (except the cart button)
+    $(document).on('click', '.jopg-photo', function(e) {
+        // Don't open lightbox if clicking the cart button
+        if ($(e.target).hasClass('jopg-add-cart') || $(e.target).closest('.jopg-add-cart').length) return;
+        e.preventDefault();
         e.stopPropagation();
         collectPhotoUrls();
-        var photo = $(this).closest('.jopg-photo');
+        var photo = $(this);
         currentPhotoId = photo.data('photo-id');
-        currentPhotoUrl = $(this).data('full-url') || $(this).attr('src');
+        currentPhotoUrl = photo.find('img').data('full-url') || photo.find('img').attr('src');
         
-        $('#jopg-lightbox-img').attr('src', currentPhotoUrl);
+        // Show loading state
+        $('#jopg-lightbox-img').attr('src', '').css('opacity', '0.3');
         $('.jopg-lb-cart').data('photo-id', currentPhotoId);
         $('#jopg-lightbox').fadeIn(200);
+        
+        // Load the full-size watermarked image
+        var img = new Image();
+        img.onload = function() {
+            $('#jopg-lightbox-img').attr('src', currentPhotoUrl).css('opacity', '1');
+        };
+        img.onerror = function() {
+            // Fallback to thumbnail if full-size fails
+            $('#jopg-lightbox-img').attr('src', photo.find('img').attr('src')).css('opacity', '1');
+        };
+        img.src = currentPhotoUrl;
     });
 
     $('.jopg-lb-close').on('click', function() {
@@ -75,6 +91,12 @@
         e.stopPropagation();
         var photoId = $(this).data('photo-id');
         $('.jopg-add-cart[data-photo-id="' + photoId + '"]').click();
+    });
+    
+    // Click image in lightbox to toggle zoom
+    $('#jopg-lightbox-img').on('click', function(e) {
+        e.stopPropagation();
+        $(this).toggleClass('jopg-zoomed');
     });
 
     function navigateLightbox(dir) {

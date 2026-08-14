@@ -83,7 +83,7 @@
     aspect-ratio: 4/3;
     overflow: hidden;
     border-radius: 6px;
-    cursor: pointer;
+    cursor: zoom-in;
     background: #1a1a1a;
 }
 
@@ -115,6 +115,11 @@
     background: rgba(0,0,0,0.5);
     opacity: 0;
     transition: opacity 0.2s;
+    pointer-events: none;
+}
+
+.jopg-photo-overlay .jopg-add-cart {
+    pointer-events: auto;
 }
 
 .jopg-photo:hover .jopg-photo-overlay {
@@ -175,6 +180,17 @@
     max-height: 80vh;
     object-fit: contain;
     display: block;
+    cursor: zoom-in;
+    transition: transform 0.3s ease;
+}
+
+.jopg-lightbox-content img.jopg-zoomed {
+    max-width: none;
+    max-height: none;
+    width: auto;
+    height: auto;
+    transform: scale(1.5);
+    cursor: zoom-out;
 }
 
 .jopg-lightbox-controls {
