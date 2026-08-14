@@ -407,6 +407,7 @@ class JOPG_Lightroom {
         global $wpdb;
         $table_albums = $wpdb->prefix . 'jopg_albums';
         $synced = 0;
+        $skipped_empty = 0;
         
         foreach ($albums as $album) {
             $lr_id = $album['id'];
@@ -415,6 +416,22 @@ class JOPG_Lightroom {
             
             // Skip non-album types (e.g. folders) — 'set' type is a real album
             $subtype = $payload['userCreated'] ?? true;
+            
+            // Check if album has any photos — skip empty albums to keep the gallery clean
+            $asset_count = $payload['assetCount'] ?? null;
+            if ($asset_count !== null && intval($asset_count) === 0) {
+                $skipped_empty++;
+                continue; // Empty album — skip
+            }
+            
+            // If assetCount is not in the payload, do a quick API check
+            if ($asset_count === null) {
+                $assets_check = $this->get_album_assets($catalog_id, $lr_id);
+                if (is_wp_error($assets_check) || empty($assets_check)) {
+                    $skipped_empty++;
+                    continue; // Empty or error — skip
+                }
+            }
             
             $slug = sanitize_title($title) . '-' . substr($lr_id, -6);
             
@@ -430,7 +447,7 @@ class JOPG_Lightroom {
             $synced++;
         }
         
-        return $synced;
+        return ['synced' => $synced, 'skipped' => $skipped_empty, 'total' => count($albums)];
     }
     
     /**
@@ -579,9 +596,9 @@ class JOPG_Lightroom {
     }
     
     public function rest_sync() {
-        $count = $this->sync_all_albums();
-        if (is_wp_error($count)) return $count;
-        return ['success' => true, 'albums_synced' => $count];
+        $result = $this->sync_all_albums();
+        if (is_wp_error($result)) return $result;
+        return ['success' => true, 'synced' => $result['synced'] ?? 0, 'skipped' => $result['skipped'] ?? 0, 'total' => $result['total'] ?? 0];
     }
     
     public function rest_get_albums() {
@@ -594,11 +611,11 @@ class JOPG_Lightroom {
         check_ajax_referer('jopg_admin', 'nonce');
         if (!current_user_can('manage_options')) wp_die('Forbidden');
         
-        $count = $this->sync_all_albums();
-        if (is_wp_error($count)) {
-            wp_send_json_error($count->get_error_message());
+        $result = $this->sync_all_albums();
+        if (is_wp_error($result)) {
+            wp_send_json_error($result->get_error_message());
         }
-        wp_send_json_success(['albums_synced' => $count]);
+        wp_send_json_success($result);
     }
     
     public function ajax_import_album() {

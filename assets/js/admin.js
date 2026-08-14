@@ -15,8 +15,13 @@
         }, function(resp) {
             btn.prop('disabled', false).text('🔄 Sync Albums from Lightroom');
             if (resp.success) {
-                result.removeClass('syncing').addClass('success')
-                    .text('✅ Synced ' + resp.data.albums_synced + ' albums!');
+                var d = resp.data;
+                var msg = '✅ Synced ' + (d.synced || 0) + ' albums';
+                if (d.skipped > 0) {
+                    msg += ' (skipped ' + d.skipped + ' empty)';
+                }
+                msg += '!';
+                result.removeClass('syncing').addClass('success').text(msg);
                 setTimeout(function() { location.reload(); }, 1500);
             } else {
                 result.removeClass('syncing').addClass('error')
