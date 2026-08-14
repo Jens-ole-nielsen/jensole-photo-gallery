@@ -347,6 +347,21 @@ class JOPG_Admin {
                     <button type="submit" name="jopg_save_settings" class="button button-primary">Save Settings</button>
                 </p>
             </form>
+            
+            <div class="jopg-help-card" style="margin-top:30px;padding:20px;background:#fff;border:1px solid #ddd;border-radius:8px;max-width:700px;">
+                <h3>📖 How to publish your gallery</h3>
+                <p style="font-size:14px;line-height:1.6;">
+                    <strong>1.</strong> Go to <strong>Pages → Add New</strong> in WordPress<br>
+                    <strong>2.</strong> Give the page a title (e.g. "Photos" or "Galleri")<br>
+                    <strong>3.</strong> Add this shortcode in the content area:<br>
+                    <code style="display:block;background:#f0f0f0;padding:8px 12px;margin:8px 0;border-radius:4px;">[jopg_gallery]</code>
+                    <strong>4.</strong> Click <strong>Publish</strong><br><br>
+                    The shortcode shows all your albums as a grid. Visitors click an album to see the photos inside.<br><br>
+                    <strong>To show a single album directly:</strong><br>
+                    <code style="display:block;background:#f0f0f0;padding:8px 12px;margin:8px 0;border-radius:4px;">[jopg_album album="3"]</code>
+                    (use the album ID or slug — find it under Photo Gallery → Albums)
+                </p>
+            </div>
         </div>
         <?php
     }

@@ -88,11 +88,11 @@ class JOPG_Shortcodes {
             <?php else: foreach ($albums as $album): 
                 $cover = $album->cover_thumb ?: ($album->cover_url ?: '');
                 if (!$cover && $album->photo_count > 0) {
-                    // Try to get first photo's watermarked URL
+                    // Try to get first photo's thumbnail URL (small, fast)
                     $first = $wpdb->get_row($wpdb->prepare(
                         "SELECT id FROM {$table_photos} WHERE album_id = %d ORDER BY id ASC LIMIT 1", $album->id
                     ));
-                    if ($first) $cover = JOPG_Watermark::get_watermarked_url($first->id);
+                    if ($first) $cover = JOPG_Watermark::get_thumb_url($first->id);
                 }
             ?>
                 <div class="jopg-album-card" data-album-id="<?php echo $album->id; ?>">
@@ -164,10 +164,11 @@ class JOPG_Shortcodes {
             <div class="jopg-photos-grid">
                 <?php foreach ($photos as $photo): 
                     $wm_url = JOPG_Watermark::get_watermarked_url($photo->id);
+                    $thumb_url = JOPG_Watermark::get_thumb_url($photo->id);
                 ?>
                 <div class="jopg-photo" data-photo-id="<?php echo $photo->id; ?>">
                     <div class="jopg-photo-thumb">
-                        <img src="<?php echo esc_url($wm_url); ?>" 
+                        <img src="<?php echo esc_url(JOPG_Watermark::get_thumb_url($photo->id)); ?>" 
                              alt="<?php echo esc_attr($photo->title ?: $photo->filename); ?>" 
                              loading="lazy"
                              data-full-url="<?php echo esc_url($wm_url); ?>">

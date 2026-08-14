@@ -15,12 +15,14 @@ class JOPG_Watermark {
     }
     
     public function register_proxy_route() {
+        add_rewrite_rule('^jopg/image/([0-9]+)/wm/thumb/?$', 'index.php?jopg_image_id=$matches[1]&jopg_watermark=1&jopg_thumb=1', 'top');
         add_rewrite_rule('^jopg/image/([0-9]+)/wm/?$', 'index.php?jopg_image_id=$matches[1]&jopg_watermark=1', 'top');
         add_rewrite_rule('^jopg/image/([0-9]+)/?$', 'index.php?jopg_image_id=$matches[1]', 'top');
         
         add_filter('query_vars', function($vars) {
             $vars[] = 'jopg_image_id';
             $vars[] = 'jopg_watermark';
+            $vars[] = 'jopg_thumb'; 
             return $vars;
         });
         
@@ -32,6 +34,7 @@ class JOPG_Watermark {
         if (!$image_id) return;
         
         $watermark = get_query_var('jopg_watermark');
+        $thumb = get_query_var('jopg_thumb');
         
         global $wpdb;
         $table = $wpdb->prefix . 'jopg_photos';
@@ -42,7 +45,7 @@ class JOPG_Watermark {
         }
         
         if ($watermark) {
-            $this->serve_watermarked($photo);
+            $this->serve_watermarked($photo, (bool)$thumb);
         } else {
             $this->serve_clean($photo);
         }
@@ -59,7 +62,7 @@ class JOPG_Watermark {
         $cache_file = $cache_dir . '/' . $cache_key . '.jpg';
         
         // Serve from cache if fresh (24h)
-        if (file_exists($cache_file) && (time() - filemtime($cache_file)) < DAY_IN_SECONDS) {
+        if (file_exists($cache_file) && (time() - filemtime($cache_file)) < (7 * DAY_IN_SECONDS)) {
             $cached_data = file_get_contents($cache_file);
             if ($cached_data && strlen($cached_data) > 100) {
                 return ['body' => $cached_data, 'content_type' => 'image/jpeg'];
@@ -78,11 +81,18 @@ class JOPG_Watermark {
         return $result;
     }
     
-    private function serve_watermarked($photo) {
-        $url = $photo->display_url ?: $photo->original_url;
+    private function serve_watermarked($photo, $thumb = false) {
+        // For thumbnails in the grid, use the small rendition (thumbnail2x) 
+        // instead of the 2048px display version — much faster to fetch
+        if ($thumb && !empty($photo->thumb_url)) {
+            $url = $photo->thumb_url;
+        } else {
+            $url = $photo->display_url ?: $photo->original_url;
+        }
         if (!$url) { $this->error_image('No URL stored for photo #' . $photo->id); exit; }
         
-        $result = $this->get_source_bytes($url, 'wm_' . $photo->id);
+        $cache_key = $thumb ? 'wm_thumb_' . $photo->id : 'wm_' . $photo->id;
+        $result = $this->get_source_bytes($url, $cache_key);
         if (is_wp_error($result)) { 
             $this->error_image('Lightroom fetch failed: ' . $result->get_error_message() . '\nURL: ' . substr($url, 0, 100));
             exit; 
@@ -257,6 +267,10 @@ class JOPG_Watermark {
     
     public static function get_watermarked_url($photo_id) {
         return home_url('/jopg/image/' . $photo_id . '/wm/');
+    }
+    
+    public static function get_thumb_url($photo_id) {
+        return home_url('/jopg/image/' . $photo_id . '/wm/thumb/');
     }
     
     public static function get_clean_url($photo_id, $token) {

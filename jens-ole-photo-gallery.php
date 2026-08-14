@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Jens Ole Photo Gallery
  * Description: Custom photo gallery with Lightroom sync, watermarking, WooCommerce sales, and client selection.
- * Version: 1.1.5
+ * Version: 1.1.6
  * Author: Jens Ole Photography
  * Text Domain: jopg
  * Requires at least: 6.0
@@ -12,7 +12,7 @@
 
 if (!defined('ABSPATH')) exit;
 
-define('JOPG_VERSION', '1.1.5');
+define('JOPG_VERSION', '1.1.6');
 define('JOPG_PATH', plugin_dir_path(__FILE__));
 define('JOPG_URL', plugin_dir_url(__FILE__));
 define('JOPG_DB_VERSION', '1.0');
