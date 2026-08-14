@@ -106,6 +106,15 @@ class JOPG_Admin {
         $table_albums = $wpdb->prefix . 'jopg_albums';
         $table_photos = $wpdb->prefix . 'jopg_photos';
         
+        // Handle "Fix Permalinks" — set a pretty permalink structure and flush
+        if (isset($_GET['action']) && $_GET['action'] === 'fix_permalinks' && current_user_can('manage_options')) {
+            update_option('permalink_structure', '/%postname%/');
+            flush_rewrite_rules();
+            add_action('admin_notices', function() {
+                echo '<div class="notice notice-success is-dismissible"><p>Permalink structure set to Post Name and rewrite rules flushed. Check Diagnostics again.</p></div>';
+            });
+        }
+        
         // Handle "Check for Updates"
         if (isset($_GET['action']) && $_GET['action'] === 'check_updates') {
             delete_transient('jopg_github_release');
@@ -507,6 +516,20 @@ class JOPG_Admin {
         
         $diagnostics = [];
         
+        // 0. Show plugin version + permalink structure FIRST — these are the
+        // two most common reasons rewrite rules silently don't work.
+        $diagnostics[] = [
+            'label' => 'Plugin Version (active code)',
+            'value' => JOPG_VERSION,
+            'ok' => true,
+        ];
+        $permalink_structure = get_option('permalink_structure', '');
+        $diagnostics[] = [
+            'label' => 'Permalink Structure',
+            'value' => $permalink_structure ? $permalink_structure : 'PLAIN (default ?p=123 links) — THIS BREAKS OUR IMAGE URLS!',
+            'ok' => (bool)$permalink_structure,
+        ];
+        
         // 1. Check Adobe connection
         $access_token = JOPG_DB::get_setting('adobe_access_token', '');
         $refresh_token = JOPG_DB::get_setting('adobe_refresh_token', '');
@@ -651,6 +674,9 @@ class JOPG_Admin {
             
             <h2 style="margin-top:30px;">Actions</h2>
             <p>
+                <?php if (!$permalink_structure): ?>
+                    <a href="<?php echo admin_url('admin.php?page=jopg&action=fix_permalinks'); ?>" class="button button-primary" style="background:#c00;border-color:#a00;">⚠️ Fix Permalinks Now (sets Post Name + flushes rules)</a>
+                <?php endif; ?>
                 <a href="<?php echo admin_url('admin.php?page=jopg&action=check_updates'); ?>" class="button">🔄 Check for Plugin Updates</a>
                 <a href="<?php echo admin_url('options-permalink.php'); ?>" class="button">📝 Go to Permalink Settings (just click Save to flush rewrite rules)</a>
             </p>
