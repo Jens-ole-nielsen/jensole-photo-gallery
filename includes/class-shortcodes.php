@@ -71,7 +71,7 @@ class JOPG_Shortcodes {
         
         $albums = $wpdb->get_results("SELECT a.*, 
             (SELECT COUNT(*) FROM {$table_photos} p WHERE p.album_id = a.id) as photo_count,
-            (SELECT thumb_url FROM {$table_photos} p WHERE p.album_id = a.id ORDER BY p.id DESC LIMIT 1) as cover_thumb
+            (SELECT id FROM {$table_photos} p WHERE p.album_id = a.id ORDER BY p.id ASC LIMIT 1) as cover_photo_id
             FROM $table_albums a WHERE a.status = 'active' 
             AND EXISTS (SELECT 1 FROM {$table_photos} p WHERE p.album_id = a.id)
             ORDER BY a.synced_at DESC");
@@ -86,13 +86,17 @@ class JOPG_Shortcodes {
             <?php if (empty($albums)): ?>
                 <p class="jopg-empty">No galleries available yet.</p>
             <?php else: foreach ($albums as $album): 
-                $cover = $album->cover_thumb ?: ($album->cover_url ?: '');
-                if (!$cover && $album->photo_count > 0) {
-                    // Try to get first photo's thumbnail URL (small, fast)
-                    $first = $wpdb->get_row($wpdb->prepare(
-                        "SELECT id FROM {$table_photos} WHERE album_id = %d ORDER BY id ASC LIMIT 1", $album->id
-                    ));
-                    if ($first) $cover = JOPG_Watermark::get_thumb_url($first->id);
+                $cover = '';
+                if (!empty($album->cover_photo_id)) {
+                    // Use direct cached file URL if available, proxy URL as fallback
+                    $upload_dir = wp_upload_dir();
+                    $cache_dir = $upload_dir['basedir'] . '/jopg-cache';
+                    $cache_file = $cache_dir . '/wm_thumb_out_' . $album->cover_photo_id . '.jpg';
+                    if (file_exists($cache_file) && filesize($cache_file) > 100) {
+                        $cover = $upload_dir['baseurl'] . '/jopg-cache/wm_thumb_out_' . $album->cover_photo_id . '.jpg';
+                    } else {
+                        $cover = JOPG_Watermark::get_thumb_url($album->cover_photo_id);
+                    }
                 }
             ?>
                 <div class="jopg-album-card" data-album-id="<?php echo $album->id; ?>">
@@ -168,7 +172,18 @@ class JOPG_Shortcodes {
                 ?>
                 <div class="jopg-photo" data-photo-id="<?php echo $photo->id; ?>">
                     <div class="jopg-photo-thumb">
-                        <img src="<?php echo esc_url(JOPG_Watermark::get_thumb_url($photo->id)); ?>" 
+                        <?php
+                        // Use direct cached file URL if available, proxy URL as fallback
+                        $upload_dir = wp_upload_dir();
+                        $cache_dir = $upload_dir['basedir'] . '/jopg-cache';
+                        $cache_file = $cache_dir . '/wm_thumb_out_' . $photo->id . '.jpg';
+                        if (file_exists($cache_file) && filesize($cache_file) > 100) {
+                            $thumb_src = $upload_dir['baseurl'] . '/jopg-cache/wm_thumb_out_' . $photo->id . '.jpg';
+                        } else {
+                            $thumb_src = JOPG_Watermark::get_thumb_url($photo->id);
+                        }
+                        ?>
+                        <img src="<?php echo esc_url($thumb_src); ?>" 
                              alt="<?php echo esc_attr($photo->title ?: $photo->filename); ?>" 
                              loading="lazy"
                              data-full-url="<?php echo esc_url($wm_url); ?>">

@@ -568,6 +568,10 @@ class JOPG_Lightroom {
             }
             
             // Create WooCommerce product for this photo
+            // Pre-generate watermarked thumbnail — fetch from Adobe, apply watermark, save to disk
+            // This makes gallery viewing instant (no PHP proxy needed on first view)
+            $this->pregenerate_thumbnail($photo_id, $thumb_url);
+            
             if (class_exists('WooCommerce')) {
                 $photo_row = $wpdb->get_row($wpdb->prepare("SELECT * FROM $table_photos WHERE id = %d", $photo_id));
                 do_action('jopg_photo_imported', $photo_id, $photo_row);
@@ -579,6 +583,44 @@ class JOPG_Lightroom {
         $wpdb->update($table_albums, ['photo_count' => $imported, 'synced_at' => current_time('mysql')], ['id' => $album_db_id]);
         
         return $imported;
+    }
+    
+    /**
+     * Pre-generate watermarked thumbnail during import.
+     * Fetches the thumbnail rendition from Adobe, applies watermark, saves to disk cache.
+     * This makes gallery viewing instant — no need to go through PHP proxy on first view.
+     */
+    private function pregenerate_thumbnail($photo_id, $thumb_url) {
+        if (!$thumb_url) return;
+        
+        $upload_dir = wp_upload_dir();
+        $cache_dir = $upload_dir['basedir'] . '/jopg-cache';
+        if (!file_exists($cache_dir)) wp_mkdir_p($cache_dir);
+        
+        $out_file = $cache_dir . '/wm_thumb_out_' . $photo_id . '.jpg';
+        
+        // Skip if already cached and fresh
+        if (file_exists($out_file) && (time() - filemtime($out_file)) < (7 * DAY_IN_SECONDS) && filesize($out_file) > 100) {
+            return;
+        }
+        
+        // Fetch the thumbnail bytes from Adobe
+        $source_file = $cache_dir . '/wm_thumb_' . $photo_id . '.jpg';
+        $result = $this->fetch_rendition_bytes($thumb_url);
+        if (is_wp_error($result)) return;
+        
+        // Cache the raw bytes
+        file_put_contents($source_file, $result['body']);
+        
+        // Load into GD, apply watermark, save
+        $image = @imagecreatefromstring($result['body']);
+        if ($image === false) return;
+        
+        $wm = JOPG_Watermark::instance();
+        $image = $wm->apply_watermark($image);
+        
+        imagejpeg($image, $out_file, 90);
+        imagedestroy($image);
     }
     
     /**

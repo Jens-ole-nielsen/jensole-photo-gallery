@@ -224,7 +224,7 @@ class JOPG_Watermark {
         imagedestroy($img);
     }
     
-    private function apply_watermark($image) {
+    public function apply_watermark($image) {
         $width = imagesx($image);
         $height = imagesy($image);
         
