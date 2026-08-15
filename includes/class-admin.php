@@ -188,9 +188,10 @@ class JOPG_Admin {
             return;
         }
         
+        // Sort: imported albums (local_photo_count > 0) first, then by synced_at desc
         $albums = $wpdb->get_results("SELECT a.*, 
             (SELECT COUNT(*) FROM {$table_photos} p WHERE p.album_id = a.id) as local_photo_count
-            FROM $table_albums a ORDER BY a.synced_at DESC");
+            FROM $table_albums a ORDER BY (local_photo_count > 0) DESC, a.synced_at DESC");
         
         ?>
         <div class="wrap jopg-admin">
@@ -202,12 +203,18 @@ class JOPG_Admin {
                 <a href="<?php echo admin_url('admin.php?page=jopg&action=check_updates'); ?>" class="button">🔄 Check for Plugin Updates</a>
             </div>
             
+            <div id="jopg-prewarm-status" style="margin-top:15px;"></div>
+            
             <?php if (empty($albums)): ?>
                 <div class="jopg-empty">
                     <p>No albums found. Click "Sync Albums from Lightroom" to fetch your Lightroom albums.</p>
                 </div>
             <?php else: ?>
-                <table class="wp-list-table widefat fixed striped">
+                <p>
+                    <input type="search" id="jopg-album-search" placeholder="Search albums..." 
+                        style="width:300px;margin-bottom:10px;" class="regular-text">
+                </p>
+                <table class="wp-list-table widefat fixed striped" id="jopg-album-table">
                     <thead>
                         <tr>
                             <th>Album</th>
@@ -219,8 +226,12 @@ class JOPG_Admin {
                     </thead>
                     <tbody>
                         <?php foreach ($albums as $album): ?>
-                            <tr>
-                                <td><strong><?php echo esc_html($album->title); ?></strong></td>
+                            <tr data-album-name="<?php echo esc_attr(strtolower($album->title)); ?>">
+                                <td><strong><?php echo esc_html($album->title); ?></strong>
+                                    <?php if ($album->local_photo_count > 0): ?>
+                                        <span class="dashicons dashicons-yes-alt" style="color:#00a32a;font-size:16px;" title="Imported"></span>
+                                    <?php endif; ?>
+                                </td>
                                 <td><?php echo $album->photo_count; ?></td>
                                 <td><?php echo $album->local_photo_count; ?></td>
                                 <td><?php echo $album->synced_at ?: '—'; ?></td>
@@ -241,8 +252,8 @@ class JOPG_Admin {
                         <?php endforeach; ?>
                     </tbody>
                 </table>
+                <p id="jopg-no-results" style="display:none;color:#666;padding:10px;">No albums match your search.</p>
             <?php endif; ?>
-            <div id="jopg-prewarm-status" style="margin-top:15px;"></div>
         </div>
         <?php
     }

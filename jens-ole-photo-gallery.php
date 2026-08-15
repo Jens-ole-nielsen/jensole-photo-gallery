@@ -12,7 +12,7 @@
 
 if (!defined('ABSPATH')) exit;
 
-define('JOPG_VERSION', '1.3.3');
+define('JOPG_VERSION', '1.3.4');
 define('JOPG_PATH', plugin_dir_path(__FILE__));
 define('JOPG_URL', plugin_dir_url(__FILE__));
 define('JOPG_DB_VERSION', '1.0');

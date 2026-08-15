@@ -114,4 +114,17 @@
         
         prewarmBatch();
     });
+
+    // Album search filter
+    $('#jopg-album-search').on('input', function() {
+        var term = $(this).val().toLowerCase().trim();
+        var visible = 0;
+        $('#jopg-album-table tbody tr').each(function() {
+            var name = $(this).data('album-name') || '';
+            var match = name.indexOf(term) !== -1;
+            $(this).toggle(match);
+            if (match) visible++;
+        });
+        $('#jopg-no-results').toggle(visible === 0);
+    });
 })(jQuery);
