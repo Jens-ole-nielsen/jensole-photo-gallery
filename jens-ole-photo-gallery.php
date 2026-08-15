@@ -12,7 +12,7 @@
 
 if (!defined('ABSPATH')) exit;
 
-define('JOPG_VERSION', '1.3.1');
+define('JOPG_VERSION', '1.3.2');
 define('JOPG_PATH', plugin_dir_path(__FILE__));
 define('JOPG_URL', plugin_dir_url(__FILE__));
 define('JOPG_DB_VERSION', '1.0');
@@ -63,6 +63,7 @@ class Jens_Ole_Photo_Gallery {
         JOPG_Updater::instance();
         
         add_action('init', [$this, 'maybe_flush_rewrite_rules']);
+        add_action('init', [$this, 'maybe_clear_watermark_cache']);
     }
     
     public function maybe_flush_rewrite_rules() {
@@ -75,6 +76,27 @@ class Jens_Ole_Photo_Gallery {
         if ($flushed_version !== JOPG_VERSION) {
             flush_rewrite_rules();
             update_option('jopg_flushed_version', JOPG_VERSION);
+        }
+    }
+    
+    public function maybe_clear_watermark_cache() {
+        // Cached watermarked images (jopg-cache/wm_*) can go stale not just
+        // when settings change (handled separately in class-admin.php) but
+        // also when the watermark RENDERING CODE ITSELF changes between
+        // plugin versions (e.g. a compositing bug fix). Since the cache
+        // check only re-generates files older than 7 days, a code fix alone
+        // would otherwise never be reflected in already-cached images. So
+        // whenever the plugin version changes, wipe the cache once.
+        $cache_cleared_version = get_option('jopg_cache_cleared_version', '');
+        if ($cache_cleared_version !== JOPG_VERSION) {
+            $upload_dir = wp_upload_dir();
+            $cache_dir = $upload_dir['basedir'] . '/jopg-cache';
+            if (file_exists($cache_dir)) {
+                foreach (glob($cache_dir . '/wm_*') as $cached_file) {
+                    @unlink($cached_file);
+                }
+            }
+            update_option('jopg_cache_cleared_version', JOPG_VERSION);
         }
     }
 }

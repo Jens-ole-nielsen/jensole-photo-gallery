@@ -386,35 +386,65 @@ class JOPG_Watermark {
      * Stamp a logo onto the target image with opacity
      */
     private function stamp_logo($image, $logo, $x, $y, $w, $h, $opacity_pct) {
-        // Use imagecopymerge for opacity control
-        // But imagecopymerge doesn't handle alpha well, so we use a temp overlay
+        // NOTE: imagecopymerge() does NOT respect a PNG's real alpha channel —
+        // it treats transparent pixels' leftover RGB data (often black) as
+        // opaque color, painting solid black rectangles instead of blending
+        // through. Fixed here with manual per-pixel alpha compositing, which
+        // correctly reads the logo's true transparency and only paints pixels
+        // that actually have visible content.
         $img_w = imagesx($image);
         $img_h = imagesy($image);
+        $logo_w = imagesx($logo);
+        $logo_h = imagesy($logo);
         
-        // Clamp position to image bounds
-        if ($x < 0) $x = 0;
-        if ($y < 0) $y = 0;
+        // Clamp position to image bounds, adjusting source offset if we clip the left/top
+        $src_x_offset = 0;
+        $src_y_offset = 0;
+        if ($x < 0) { $src_x_offset = -$x; $w += $x; $x = 0; }
+        if ($y < 0) { $src_y_offset = -$y; $h += $y; $y = 0; }
         if ($x + $w > $img_w) $w = $img_w - $x;
         if ($y + $h > $img_h) $h = $img_h - $y;
+        if ($src_x_offset + $w > $logo_w) $w = $logo_w - $src_x_offset;
+        if ($src_y_offset + $h > $logo_h) $h = $logo_h - $src_y_offset;
         if ($w <= 0 || $h <= 0) return;
         
-        // Create a temp copy of the logo region with opacity
-        $temp = imagecreatetruecolor($w, $h);
-        imagesavealpha($temp, true);
-        imagealphablending($temp, false);
-        $transparent = imagecolorallocatealpha($temp, 0, 0, 0, 127);
-        imagefill($temp, 0, 0, $transparent);
-        imagealphablending($temp, true);
+        $opacity_factor = max(0, min(100, $opacity_pct)) / 100;
+        if ($opacity_factor <= 0) return;
         
-        // Copy the logo into temp at the right opacity
-        // imagecopymerge preserves alpha when using truecolor
-        $opacity_gd = max(0, min(100, $opacity_pct));
-        imagecopymerge($temp, $logo, 0, 0, 0, 0, $w, $h, $opacity_gd);
+        imagealphablending($image, false);
         
-        // Merge temp onto the image
-        imagealphablending($image, true);
-        imagecopy($image, $temp, $x, $y, 0, 0, $w, $h);
-        imagedestroy($temp);
+        for ($j = 0; $j < $h; $j++) {
+            $sy = $j + $src_y_offset;
+            $dy = $y + $j;
+            for ($i = 0; $i < $w; $i++) {
+                $sx = $i + $src_x_offset;
+                
+                $src_rgba = imagecolorat($logo, $sx, $sy);
+                $src_alpha = ($src_rgba >> 24) & 0x7F; // GD alpha: 0 = opaque, 127 = fully transparent
+                if ($src_alpha >= 127) continue; // fully transparent pixel — skip, leave photo untouched
+                
+                $src_r = ($src_rgba >> 16) & 0xFF;
+                $src_g = ($src_rgba >> 8) & 0xFF;
+                $src_b = $src_rgba & 0xFF;
+                
+                // Combine the logo's own transparency with the configured watermark opacity
+                $blend = (1 - $src_alpha / 127) * $opacity_factor;
+                if ($blend <= 0.004) continue; // negligible, skip for speed
+                
+                $dx = $x + $i;
+                $dst_rgba = imagecolorat($image, $dx, $dy);
+                $dst_r = ($dst_rgba >> 16) & 0xFF;
+                $dst_g = ($dst_rgba >> 8) & 0xFF;
+                $dst_b = $dst_rgba & 0xFF;
+                
+                $new_r = (int)round($dst_r * (1 - $blend) + $src_r * $blend);
+                $new_g = (int)round($dst_g * (1 - $blend) + $src_g * $blend);
+                $new_b = (int)round($dst_b * (1 - $blend) + $src_b * $blend);
+                
+                $color = imagecolorallocate($image, $new_r, $new_g, $new_b);
+                imagesetpixel($image, $dx, $dy, $color);
+            }
+        }
     }
     
     public static function get_watermarked_url($photo_id) {
