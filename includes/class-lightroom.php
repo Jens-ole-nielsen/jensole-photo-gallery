@@ -744,17 +744,21 @@ class JOPG_Lightroom {
         
         $batch_size = intval($_POST['batch_size'] ?? 5);
         $offset = intval($_POST['offset'] ?? 0);
+        $album_id = intval($_POST['album_id'] ?? 0);
         $batch_size = max(1, min($batch_size, 10)); // Max 10 per batch to avoid timeout
+        
+        // Filter by album if specified, otherwise cache all
+        $where = $album_id > 0 ? $wpdb->prepare("WHERE album_id = %d", $album_id) : '';
         
         // Get photos that need caching
         $photos = $wpdb->get_results($wpdb->prepare(
-            "SELECT id, thumb_url, display_url FROM $table_photos ORDER BY id ASC LIMIT %d OFFSET %d",
+            "SELECT id, thumb_url, display_url FROM $table_photos $where ORDER BY id ASC LIMIT %d OFFSET %d",
             $batch_size, $offset
         ));
         
         $cached = 0;
         $failed = 0;
-        $total = intval($wpdb->get_var("SELECT COUNT(*) FROM $table_photos"));
+        $total = intval($wpdb->get_var("SELECT COUNT(*) FROM $table_photos $where"));
         
         foreach ($photos as $photo) {
             // Pre-generate thumbnail

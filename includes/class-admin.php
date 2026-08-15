@@ -199,10 +199,8 @@ class JOPG_Admin {
             
             <div class="jopg-actions">
                 <button class="button button-primary" id="jopg-sync-now">🔄 Sync Albums from Lightroom</button>
-                <button class="button" id="jopg-prewarm">🔥 Pre-warm Image Cache</button>
                 <a href="<?php echo admin_url('admin.php?page=jopg&action=check_updates'); ?>" class="button">🔄 Check for Plugin Updates</a>
             </div>
-            <div id="jopg-prewarm-status" style="margin-top:10px;"></div>
             
             <?php if (empty($albums)): ?>
                 <div class="jopg-empty">
@@ -231,6 +229,10 @@ class JOPG_Admin {
                                             data-album-id="<?php echo $album->id; ?>">
                                         📥 Import Photos
                                     </button>
+                                    <button class="button button-small jopg-prewarm-album" 
+                                            data-album-id="<?php echo $album->id; ?>">
+                                        🔥 Pre-warm Cache
+                                    </button>
                                     <a class="button button-small" href="<?php echo admin_url('admin.php?page=jopg&action=view_album&album_id=' . $album->id); ?>">
                                         View Photos
                                     </a>
@@ -240,6 +242,7 @@ class JOPG_Admin {
                     </tbody>
                 </table>
             <?php endif; ?>
+            <div id="jopg-prewarm-status" style="margin-top:15px;"></div>
         </div>
         <?php
     }
@@ -291,6 +294,7 @@ class JOPG_Admin {
                     <?php endforeach; ?>
                 </div>
             <?php endif; ?>
+            <div id="jopg-prewarm-status" style="margin-top:15px;"></div>
         </div>
         <?php
     }
@@ -538,6 +542,7 @@ class JOPG_Admin {
                 <span id="jopg-sync-result"></span>
             </div>
             <?php endif; ?>
+            <div id="jopg-prewarm-status" style="margin-top:15px;"></div>
         </div>
         <?php
     }
@@ -645,6 +650,7 @@ class JOPG_Admin {
                     </tbody>
                 </table>
             <?php endif; ?>
+            <div id="jopg-prewarm-status" style="margin-top:15px;"></div>
         </div>
         <?php
     }
