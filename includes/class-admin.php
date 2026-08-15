@@ -199,8 +199,10 @@ class JOPG_Admin {
             
             <div class="jopg-actions">
                 <button class="button button-primary" id="jopg-sync-now">🔄 Sync Albums from Lightroom</button>
+                <button class="button" id="jopg-prewarm">🔥 Pre-warm Image Cache</button>
                 <a href="<?php echo admin_url('admin.php?page=jopg&action=check_updates'); ?>" class="button">🔄 Check for Plugin Updates</a>
             </div>
+            <div id="jopg-prewarm-status" style="margin-top:10px;"></div>
             
             <?php if (empty($albums)): ?>
                 <div class="jopg-empty">

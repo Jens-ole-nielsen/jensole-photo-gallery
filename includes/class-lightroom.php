@@ -26,6 +26,7 @@ class JOPG_Lightroom {
         add_action('jopg_sync_lightroom', [$this, 'sync_all_albums']);
         add_action('wp_ajax_jopg_sync_albums', [$this, 'ajax_sync_albums']);
         add_action('wp_ajax_jopg_import_album', [$this, 'ajax_import_album']);
+        add_action('wp_ajax_jopg_prewarm_cache', [$this, 'ajax_prewarm_cache']);
         
         // OAuth connect flow — admin only
         add_action('admin_post_jopg_lightroom_connect', [$this, 'start_oauth']);
@@ -590,7 +591,7 @@ class JOPG_Lightroom {
      * Fetches the thumbnail rendition from Adobe, applies watermark, saves to disk cache.
      * This makes gallery viewing instant — no need to go through PHP proxy on first view.
      */
-    private function pregenerate_thumbnail($photo_id, $thumb_url) {
+    public function pregenerate_thumbnail($photo_id, $thumb_url) {
         if (!$thumb_url) return;
         
         $upload_dir = wp_upload_dir();
@@ -725,6 +726,80 @@ class JOPG_Lightroom {
             wp_send_json_error($result->get_error_message());
         }
         wp_send_json_success(['photos_imported' => $result]);
+    }
+    
+    /**
+     * AJAX: Pre-warm thumbnail cache in batches.
+     * Processes N photos per call, JS loops until all done.
+     */
+    public function ajax_prewarm_cache() {
+        check_ajax_referer('jopg_admin', 'nonce');
+        
+        if (!current_user_can('manage_options')) {
+            wp_send_json_error('Permission denied');
+        }
+        
+        global $wpdb;
+        $table_photos = $wpdb->prefix . 'jopg_photos';
+        
+        $batch_size = intval($_POST['batch_size'] ?? 5);
+        $offset = intval($_POST['offset'] ?? 0);
+        $batch_size = max(1, min($batch_size, 10)); // Max 10 per batch to avoid timeout
+        
+        // Get photos that need caching
+        $photos = $wpdb->get_results($wpdb->prepare(
+            "SELECT id, thumb_url, display_url FROM $table_photos ORDER BY id ASC LIMIT %d OFFSET %d",
+            $batch_size, $offset
+        ));
+        
+        $cached = 0;
+        $failed = 0;
+        $total = intval($wpdb->get_var("SELECT COUNT(*) FROM $table_photos"));
+        
+        foreach ($photos as $photo) {
+            // Pre-generate thumbnail
+            $this->pregenerate_thumbnail($photo->id, $photo->thumb_url);
+            
+            // Also pre-generate display-size watermarked image (for lightbox)
+            if (!empty($photo->display_url)) {
+                $upload_dir = wp_upload_dir();
+                $cache_dir = $upload_dir['basedir'] . '/jopg-cache';
+                $out_file = $cache_dir . '/wm_out_' . $photo->id . '.jpg';
+                
+                if (!file_exists($out_file) || (time() - filemtime($out_file)) > (7 * DAY_IN_SECONDS)) {
+                    $result = $this->fetch_rendition_bytes($photo->display_url);
+                    if (!is_wp_error($result)) {
+                        $image = @imagecreatefromstring($result['body']);
+                        if ($image !== false) {
+                            $wm = JOPG_Watermark::instance();
+                            $image = $wm->apply_watermark($image);
+                            imagejpeg($image, $out_file, 90);
+                            imagedestroy($image);
+                        }
+                    }
+                }
+            }
+            
+            // Verify cache was created
+            $thumb_cache = $upload_dir['basedir'] . '/jopg-cache/wm_thumb_out_' . $photo->id . '.jpg';
+            if (file_exists($thumb_cache) && filesize($thumb_cache) > 100) {
+                $cached++;
+            } else {
+                $failed++;
+            }
+        }
+        
+        $done = $offset + count($photos);
+        $remaining = max(0, $total - $done);
+        
+        wp_send_json_success([
+            'cached' => $cached,
+            'failed' => $failed,
+            'processed' => count($photos),
+            'done' => $done,
+            'total' => $total,
+            'remaining' => $remaining,
+        ]);
     }
     
     /**
