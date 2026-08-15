@@ -228,8 +228,30 @@ class JOPG_Watermark {
         $width = imagesx($image);
         $height = imagesy($image);
         
-        $watermark_text = JOPG_DB::get_setting('watermark_text', 'Jens Ole Photography');
+        $wm_type = JOPG_DB::get_setting('watermark_type', 'text');
         $opacity = intval(JOPG_DB::get_setting('watermark_opacity', '30'));
+        // Convert opacity (0-100, lower=transparent) to GD alpha (0=opaque, 127=transparent)
+        $alpha = 127 - intval($opacity * 1.27);
+        
+        if ($wm_type === 'logo' || $wm_type === 'pattern') {
+            $logo_path = JOPG_DB::get_setting('watermark_logo_path', '');
+            if ($logo_path && file_exists($logo_path)) {
+                return $this->apply_logo_watermark($image, $logo_path, $wm_type, $alpha);
+            }
+            // No logo uploaded — fall through to text
+        }
+        
+        return $this->apply_text_watermark($image, $alpha);
+    }
+    
+    /**
+     * Apply text watermark
+     */
+    private function apply_text_watermark($image, $alpha) {
+        $width = imagesx($image);
+        $height = imagesy($image);
+        
+        $watermark_text = JOPG_DB::get_setting('watermark_text', 'Jens Ole Photography');
         $position = JOPG_DB::get_setting('watermark_position', 'center');
         
         $font_path = JOPG_PATH . 'assets/fonts/Montserrat-Medium.ttf';
@@ -247,21 +269,14 @@ class JOPG_Watermark {
         }
         
         $margin = 20;
-        switch ($position) {
-            case 'top-left':
-                $x = $margin; $y = $margin + $text_height; break;
-            case 'top-right':
-                $x = $width - $text_width - $margin; $y = $margin + $text_height; break;
-            case 'bottom-left':
-                $x = $margin; $y = $height - $margin; break;
-            case 'bottom-right':
-                $x = $width - $text_width - $margin; $y = $height - $margin; break;
-            case 'center':
-            default:
-                $x = ($width - $text_width) / 2;
-                $y = ($height + $text_height) / 2;
-                break;
-        }
+        $positions = [
+            'top-left'     => [$margin, $margin + $text_height],
+            'top-right'    => [$width - $text_width - $margin, $margin + $text_height],
+            'bottom-left'  => [$margin, $height - $margin],
+            'bottom-right' => [$width - $text_width - $margin, $height - $margin],
+            'center'       => [($width - $text_width) / 2, ($height + $text_height) / 2],
+        ];
+        $pos = $positions[$position] ?? $positions['center'];
         
         $overlay = imagecreatetruecolor($width, $height);
         imagesavealpha($overlay, true);
@@ -270,12 +285,12 @@ class JOPG_Watermark {
         imagefill($overlay, 0, 0, $transparent);
         imagealphablending($overlay, true);
         
-        $text_color = imagecolorallocatealpha($overlay, 255, 255, 255, $opacity);
+        $text_color = imagecolorallocatealpha($overlay, 255, 255, 255, $alpha);
         
         if ($use_ttf) {
-            imagettftext($overlay, $font_size, 0, $x, $y, $text_color, $font_path, $watermark_text);
+            imagettftext($overlay, $font_size, 0, $pos[0], $pos[1], $text_color, $font_path, $watermark_text);
         } else {
-            imagestring($overlay, 5, $x, $y - $text_height, $watermark_text, $text_color);
+            imagestring($overlay, 5, $pos[0], $pos[1] - $text_height, $watermark_text, $text_color);
         }
         
         imagealphablending($image, true);
@@ -284,6 +299,122 @@ class JOPG_Watermark {
         imagedestroy($overlay);
         
         return $image;
+    }
+    
+    /**
+     * Apply logo watermark — single or pattern (net)
+     */
+    private function apply_logo_watermark($image, $logo_path, $mode, $alpha) {
+        $width = imagesx($image);
+        $height = imagesy($image);
+        
+        // Load logo
+        $logo_info = @getimagesize($logo_path);
+        if (!$logo_info) return $image;
+        
+        $mime = $logo_info['mime'];
+        if ($mime === 'image/png') {
+            $logo = @imagecreatefrompng($logo_path);
+        } elseif ($mime === 'image/jpeg') {
+            $logo = @imagecreatefromjpeg($logo_path);
+        } elseif ($mime === 'image/gif') {
+            $logo = @imagecreatefromgif($logo_path);
+        } else {
+            return $image;
+        }
+        if (!$logo) return $image;
+        
+        imagealphablending($logo, true);
+        imagesavealpha($logo, true);
+        $logo_w = imagesx($logo);
+        $logo_h = imagesy($logo);
+        
+        // Scale logo to desired size (% of image width)
+        $size_pct = intval(JOPG_DB::get_setting('watermark_size', '30'));
+        $target_w = max(20, intval($width * $size_pct / 100));
+        $scale = $target_w / $logo_w;
+        $target_h = intval($logo_h * $scale);
+        
+        $scaled_logo = imagecreatetruecolor($target_w, $target_h);
+        imagesavealpha($scaled_logo, true);
+        imagealphablending($scaled_logo, false);
+        $transparent = imagecolorallocatealpha($scaled_logo, 0, 0, 0, 127);
+        imagefill($scaled_logo, 0, 0, $transparent);
+        imagealphablending($scaled_logo, true);
+        imagecopyresampled($scaled_logo, $logo, 0, 0, 0, 0, $target_w, $target_h, $logo_w, $logo_h);
+        imagedestroy($logo);
+        
+        // Apply opacity to the scaled logo
+        $opacity_pct = intval(JOPG_DB::get_setting('watermark_opacity', '30'));
+        
+        if ($mode === 'pattern') {
+            // Tile the logo across the entire image
+            $spacing = max($target_w + 20, intval(JOPG_DB::get_setting('watermark_spacing', '100')));
+            $step_x = $spacing;
+            $step_y = intval($spacing * $target_h / $target_w);
+            if ($step_y < 20) $step_y = $spacing;
+            
+            // Offset rows for a more organic pattern
+            $row = 0;
+            for ($y = 0; $y < $height; $y += $step_y) {
+                $x_offset = ($row % 2) ? intval($step_x / 2) : 0;
+                for ($x = -$target_w + $x_offset; $x < $width; $x += $step_x) {
+                    $this->stamp_logo($image, $scaled_logo, $x, $y, $target_w, $target_h, $opacity_pct);
+                }
+                $row++;
+            }
+        } else {
+            // Single logo — position it
+            $position = JOPG_DB::get_setting('watermark_position', 'center');
+            $margin = 20;
+            $positions = [
+                'top-left'     => [$margin, $margin],
+                'top-right'    => [$width - $target_w - $margin, $margin],
+                'bottom-left'  => [$margin, $height - $target_h - $margin],
+                'bottom-right' => [$width - $target_w - $margin, $height - $target_h - $margin],
+                'center'       => [intval(($width - $target_w) / 2), intval(($height - $target_h) / 2)],
+            ];
+            $pos = $positions[$position] ?? $positions['center'];
+            $this->stamp_logo($image, $scaled_logo, $pos[0], $pos[1], $target_w, $target_h, $opacity_pct);
+        }
+        
+        imagedestroy($scaled_logo);
+        return $image;
+    }
+    
+    /**
+     * Stamp a logo onto the target image with opacity
+     */
+    private function stamp_logo($image, $logo, $x, $y, $w, $h, $opacity_pct) {
+        // Use imagecopymerge for opacity control
+        // But imagecopymerge doesn't handle alpha well, so we use a temp overlay
+        $img_w = imagesx($image);
+        $img_h = imagesy($image);
+        
+        // Clamp position to image bounds
+        if ($x < 0) $x = 0;
+        if ($y < 0) $y = 0;
+        if ($x + $w > $img_w) $w = $img_w - $x;
+        if ($y + $h > $img_h) $h = $img_h - $y;
+        if ($w <= 0 || $h <= 0) return;
+        
+        // Create a temp copy of the logo region with opacity
+        $temp = imagecreatetruecolor($w, $h);
+        imagesavealpha($temp, true);
+        imagealphablending($temp, false);
+        $transparent = imagecolorallocatealpha($temp, 0, 0, 0, 127);
+        imagefill($temp, 0, 0, $transparent);
+        imagealphablending($temp, true);
+        
+        // Copy the logo into temp at the right opacity
+        // imagecopymerge preserves alpha when using truecolor
+        $opacity_gd = max(0, min(100, $opacity_pct));
+        imagecopymerge($temp, $logo, 0, 0, 0, 0, $w, $h, $opacity_gd);
+        
+        // Merge temp onto the image
+        imagealphablending($image, true);
+        imagecopy($image, $temp, $x, $y, 0, 0, $w, $h);
+        imagedestroy($temp);
     }
     
     public static function get_watermarked_url($photo_id) {

@@ -57,6 +57,7 @@ class JOPG_Admin {
             
             $settings = ['adobe_client_id', 'adobe_client_secret', 'watermark_text', 
                          'watermark_opacity', 'watermark_position',
+                         'watermark_type', 'watermark_size', 'watermark_mode', 'watermark_spacing',
                          'single_price', 'bundle_qty', 'bundle_price',
                          'download_expiry_days', 'max_downloads', 'guest_checkout',
                          'sync_interval'];
@@ -77,8 +78,62 @@ class JOPG_Admin {
             // even if the site owner didn't manually save Permalinks after updating credentials
             flush_rewrite_rules();
             
+            // Handle logo upload for watermark
+            if (!empty($_FILES['watermark_logo']['tmp_name'])) {
+                $allowed = ['image/png', 'image/jpeg', 'image/gif'];
+                $finfo = finfo_open(FILEINFO_MIME_TYPE);
+                $mime = finfo_file($finfo, $_FILES['watermark_logo']['tmp_name']);
+                finfo_close($finfo);
+                
+                if (in_array($mime, $allowed)) {
+                    $upload_dir = wp_upload_dir();
+                    $logo_dir = $upload_dir['basedir'] . '/jopg-watermark';
+                    if (!file_exists($logo_dir)) wp_mkdir_p($logo_dir);
+                    
+                    // Delete old logo
+                    $old_logo = JOPG_DB::get_setting('watermark_logo_path', '');
+                    if ($old_logo && file_exists($old_logo)) unlink($old_logo);
+                    
+                    $ext = $mime === 'image/png' ? 'png' : ($mime === 'image/gif' ? 'gif' : 'jpg');
+                    $logo_path = $logo_dir . '/watermark-logo.' . $ext;
+                    move_uploaded_file($_FILES['watermark_logo']['tmp_name'], $logo_path);
+                    JOPG_DB::set_setting('watermark_logo_path', $logo_path);
+                }
+            }
+            
+            // Handle logo removal
+            if (!empty($_POST['watermark_remove_logo'])) {
+                $old_logo = JOPG_DB::get_setting('watermark_logo_path', '');
+                if ($old_logo && file_exists($old_logo)) unlink($old_logo);
+                JOPG_DB::set_setting('watermark_logo_path', '');
+            }
+            
+            // Clear watermark cache — settings changed, so cached images are outdated
+            $upload_dir = wp_upload_dir();
+            $cache_dir = $upload_dir['basedir'] . '/jopg-cache';
+            if (file_exists($cache_dir)) {
+                foreach (glob($cache_dir . '/wm_*') as $cached_file) {
+                    @unlink($cached_file);
+                }
+            }
+            
             add_action('admin_notices', function() {
-                echo '<div class="notice notice-success is-dismissible"><p>Settings saved.</p></div>';
+                echo '<div class="notice notice-success is-dismissible"><p>Settings saved. Watermark cache cleared — new watermark will be applied on next view.</p></div>';
+            });
+        }
+        
+        // Apply price to all imported photos
+        if (isset($_POST['jopg_apply_price'])) {
+            check_admin_referer('jopg_settings');
+            global $wpdb;
+            $table_photos = $wpdb->prefix . 'jopg_photos';
+            $price = floatval(JOPG_DB::get_setting('single_price', '49'));
+            $updated = $wpdb->query($wpdb->prepare(
+                "UPDATE $table_photos SET price = %f",
+                $price
+            ));
+            add_action('admin_notices', function() use ($updated) {
+                echo '<div class="notice notice-success is-dismissible"><p>Applied new price to ' . intval($updated) . ' photos.</p></div>';
             });
         }
         
@@ -243,7 +298,7 @@ class JOPG_Admin {
         ?>
         <div class="wrap jopg-admin">
             <h1>Gallery Settings</h1>
-            <form method="post" action="" autocomplete="off">
+            <form method="post" action="" autocomplete="off" enctype="multipart/form-data">
                 <?php wp_nonce_field('jopg_settings'); ?>
                 
                 <h3>Adobe Lightroom API</h3>
@@ -277,16 +332,59 @@ class JOPG_Admin {
                 <h3>Watermark</h3>
                 <table class="form-table">
                     <tr>
+                        <th>Watermark type</th>
+                        <td>
+                            <select name="watermark_type" id="jopg-wm-type">
+                                <?php
+                                $wm_type = $s['watermark_type'] ?? 'text';
+                                $types = ['text' => 'Text', 'logo' => 'Logo image', 'pattern' => 'Logo pattern (net)'];
+                                foreach ($types as $val => $label): ?>
+                                    <option value="<?php echo $val; ?>" <?php selected($wm_type, $val); ?>><?php echo $label; ?></option>
+                                <?php endforeach; ?>
+                            </select>
+                            <p class="description">Choose "Logo pattern (net)" to tile a small logo across the entire image.</p>
+                        </td>
+                    </tr>
+                    <tr class="jopg-wm-text-row">
                         <th>Watermark text</th>
                         <td><input type="text" name="watermark_text" class="regular-text" 
                             value="<?php echo esc_attr($s['watermark_text'] ?? 'Jens Ole Photography'); ?>"></td>
+                    </tr>
+                    <tr class="jopg-wm-logo-row">
+                        <th>Logo image</th>
+                        <td>
+                            <input type="file" name="watermark_logo" accept="image/png,image/jpeg,image/gif">
+                            <?php
+                            $logo_path = $s['watermark_logo_path'] ?? '';
+                            if ($logo_path && file_exists($logo_path)):
+                                $upload_dir = wp_upload_dir();
+                                $logo_url = str_replace($upload_dir['basedir'], $upload_dir['baseurl'], $logo_path);
+                            ?>
+                                <p class="description">
+                                    Current logo: <img src="<?php echo esc_url($logo_url); ?>" style="max-height:40px;vertical-align:middle;"> 
+                                    <label><input type="checkbox" name="watermark_remove_logo" value="1"> Remove logo</label>
+                                </p>
+                            <?php else: ?>
+                                <p class="description">Upload a PNG with transparency for best results.</p>
+                            <?php endif; ?>
+                        </td>
                     </tr>
                     <tr>
                         <th>Opacity (0-100, lower = more transparent)</th>
                         <td><input type="number" name="watermark_opacity" min="0" max="100"
                             value="<?php echo esc_attr($s['watermark_opacity'] ?? '30'); ?>"></td>
                     </tr>
-                    <tr>
+                    <tr class="jopg-wm-size-row">
+                        <th>Size (% of image width)</th>
+                        <td>
+                            <input type="range" name="watermark_size" min="5" max="80" step="5"
+                                value="<?php echo esc_attr($s['watermark_size'] ?? '30'); ?>" 
+                                oninput="document.getElementById('jopg-wm-size-val').textContent = this.value + '%';">
+                            <span id="jopg-wm-size-val" style="font-weight:bold;"><?php echo esc_attr($s['watermark_size'] ?? '30'); ?>%</span>
+                            <p class="description">How large the watermark should be relative to the image.</p>
+                        </td>
+                    </tr>
+                    <tr class="jopg-wm-position-row">
                         <th>Position</th>
                         <td>
                             <select name="watermark_position">
@@ -298,9 +396,33 @@ class JOPG_Admin {
                                     <option value="<?php echo $val; ?>" <?php selected($current, $val); ?>><?php echo $label; ?></option>
                                 <?php endforeach; ?>
                             </select>
+                            <p class="description">Only used for single text/logo, not pattern mode.</p>
+                        </td>
+                    </tr>
+                    <tr class="jopg-wm-spacing-row">
+                        <th>Pattern spacing (px)</th>
+                        <td>
+                            <input type="number" name="watermark_spacing" min="20" max="500" step="10"
+                                value="<?php echo esc_attr($s['watermark_spacing'] ?? '100'); ?>">
+                            <p class="description">Distance between repeated logos in pattern mode. Smaller = denser net.</p>
                         </td>
                     </tr>
                 </table>
+                
+                <script>
+                jQuery(function($) {
+                    function toggleWmRows() {
+                        var type = $('#jopg-wm-type').val();
+                        $('.jopg-wm-text-row').toggle(type === 'text');
+                        $('.jopg-wm-logo-row').toggle(type === 'logo' || type === 'pattern');
+                        $('.jopg-wm-position-row').toggle(type !== 'pattern');
+                        $('.jopg-wm-spacing-row').toggle(type === 'pattern');
+                        $('.jopg-wm-size-row').toggle(type !== 'text');
+                    }
+                    toggleWmRows();
+                    $('#jopg-wm-type').on('change', toggleWmRows);
+                });
+                </script>
                 
                 <h3>Pricing</h3>
                 <table class="form-table">
@@ -345,6 +467,10 @@ class JOPG_Admin {
                 
                 <p class="submit">
                     <button type="submit" name="jopg_save_settings" class="button button-primary">Save Settings</button>
+                    <button type="submit" name="jopg_apply_price" class="button" 
+                        onclick="return confirm('Apply the current single photo price to ALL imported photos? This will overwrite per-photo prices.');">
+                        Apply price to all photos
+                    </button>
                 </p>
             </form>
             
