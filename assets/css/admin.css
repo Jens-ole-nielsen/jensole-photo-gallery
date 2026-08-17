@@ -40,3 +40,7 @@
 .jopg-admin .button-small {
     margin-right: 4px;
 }
+
+/* Hidden albums — dimmed rows */
+.jopg-album-hidden { opacity: 0.5; }
+.jopg-album-hidden td:first-child strong { text-decoration: line-through; }

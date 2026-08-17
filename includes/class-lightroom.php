@@ -27,6 +27,8 @@ class JOPG_Lightroom {
         add_action('wp_ajax_jopg_sync_albums', [$this, 'ajax_sync_albums']);
         add_action('wp_ajax_jopg_import_album', [$this, 'ajax_import_album']);
         add_action('wp_ajax_jopg_prewarm_cache', [$this, 'ajax_prewarm_cache']);
+        add_action('wp_ajax_jopg_hide_album', [$this, 'ajax_hide_album']);
+        add_action('wp_ajax_jopg_restore_album', [$this, 'ajax_restore_album']);
         
         // OAuth connect flow — admin only
         add_action('admin_post_jopg_lightroom_connect', [$this, 'start_oauth']);
@@ -492,6 +494,13 @@ class JOPG_Lightroom {
             
             if ($existing_id) {
                 // Update existing album — preserves id so jopg_photos.album_id stays valid
+                // BUT preserve 'hidden' status if user has manually excluded this album
+                $existing_status = $wpdb->get_var($wpdb->prepare(
+                    "SELECT status FROM $table_albums WHERE id = %d", $existing_id
+                ));
+                if ($existing_status === 'hidden') {
+                    $album_data['status'] = 'hidden';
+                }
                 $wpdb->update($table_albums, $album_data, ['id' => $existing_id]);
             } else {
                 // New album — insert
@@ -732,6 +741,64 @@ class JOPG_Lightroom {
      * AJAX: Pre-warm thumbnail cache in batches.
      * Processes N photos per call, JS loops until all done.
      */
+    /**
+     * AJAX: Hide (remove) an album — stops it from syncing and showing in gallery
+     */
+    public function ajax_hide_album() {
+        check_ajax_referer('jopg_admin', 'nonce');
+        if (!current_user_can('manage_options')) wp_send_json_error('Permission denied');
+        
+        global $wpdb;
+        $table_albums = $wpdb->prefix . 'jopg_albums';
+        $table_photos = $wpdb->prefix . 'jopg_photos';
+        
+        $album_id = intval($_POST['album_id'] ?? 0);
+        if (!$album_id) wp_send_json_error('Invalid album ID');
+        
+        // Set album status to hidden
+        $wpdb->update($table_albums, ['status' => 'hidden'], ['id' => $album_id]);
+        
+        // Delete cached images for this album's photos
+        $photos = $wpdb->get_results($wpdb->prepare(
+            "SELECT id FROM $table_photos WHERE album_id = %d", $album_id
+        ));
+        $upload_dir = wp_upload_dir();
+        $cache_dir = $upload_dir['basedir'] . '/jopg-cache';
+        $deleted_files = 0;
+        foreach ($photos as $photo) {
+            foreach ([
+                $cache_dir . '/wm_thumb_out_' . $photo->id . '.jpg',
+                $cache_dir . '/wm_out_' . $photo->id . '.jpg',
+                $cache_dir . '/wm_thumb_' . $photo->id . '.jpg',
+            ] as $file) {
+                if (file_exists($file)) { @unlink($file); $deleted_files++; }
+            }
+        }
+        
+        wp_send_json_success([
+            'album_id' => $album_id,
+            'deleted_cache_files' => $deleted_files,
+        ]);
+    }
+    
+    /**
+     * AJAX: Restore a hidden album
+     */
+    public function ajax_restore_album() {
+        check_ajax_referer('jopg_admin', 'nonce');
+        if (!current_user_can('manage_options')) wp_send_json_error('Permission denied');
+        
+        global $wpdb;
+        $table_albums = $wpdb->prefix . 'jopg_albums';
+        
+        $album_id = intval($_POST['album_id'] ?? 0);
+        if (!$album_id) wp_send_json_error('Invalid album ID');
+        
+        $wpdb->update($table_albums, ['status' => 'active'], ['id' => $album_id]);
+        
+        wp_send_json_success(['album_id' => $album_id]);
+    }
+    
     public function ajax_prewarm_cache() {
         check_ajax_referer('jopg_admin', 'nonce');
         

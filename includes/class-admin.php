@@ -188,10 +188,13 @@ class JOPG_Admin {
             return;
         }
         
-        // Sort: imported albums (local_photo_count > 0) first, then by synced_at desc
+        // Sort: active+imported albums first, hidden albums at the bottom
         $albums = $wpdb->get_results("SELECT a.*, 
             (SELECT COUNT(*) FROM {$table_photos} p WHERE p.album_id = a.id) as local_photo_count
-            FROM $table_albums a ORDER BY (local_photo_count > 0) DESC, a.synced_at DESC");
+            FROM $table_albums a ORDER BY 
+            (a.status = 'active') DESC,
+            (local_photo_count > 0) DESC,
+            a.synced_at DESC");
         
         ?>
         <div class="wrap jopg-admin">
@@ -226,9 +229,14 @@ class JOPG_Admin {
                     </thead>
                     <tbody>
                         <?php foreach ($albums as $album): ?>
-                            <tr data-album-name="<?php echo esc_attr(strtolower($album->title)); ?>">
-                                <td><strong><?php echo esc_html($album->title); ?></strong>
-                                    <?php if ($album->local_photo_count > 0): ?>
+                            <tr data-album-name="<?php echo esc_attr(strtolower($album->title)); ?>" 
+                                class="<?php echo $album->status === 'hidden' ? 'jopg-album-hidden' : ''; ?>"
+                                data-album-id="<?php echo $album->id; ?>">
+                                <td>
+                                    <strong><?php echo esc_html($album->title); ?></strong>
+                                    <?php if ($album->status === 'hidden'): ?>
+                                        <span style="color:#999;font-style:italic;font-size:12px;">(hidden)</span>
+                                    <?php elseif ($album->local_photo_count > 0): ?>
                                         <span class="dashicons dashicons-yes-alt" style="color:#00a32a;font-size:16px;" title="Imported"></span>
                                     <?php endif; ?>
                                 </td>
@@ -236,17 +244,31 @@ class JOPG_Admin {
                                 <td><?php echo $album->local_photo_count; ?></td>
                                 <td><?php echo $album->synced_at ?: '—'; ?></td>
                                 <td>
+                                    <?php if ($album->status !== 'hidden'): ?>
                                     <button class="button button-small jopg-import-album" 
                                             data-album-id="<?php echo $album->id; ?>">
-                                        📥 Import Photos
+                                        📥 Import
                                     </button>
                                     <button class="button button-small jopg-prewarm-album" 
                                             data-album-id="<?php echo $album->id; ?>">
-                                        🔥 Pre-warm Cache
+                                        🔥 Pre-warm
                                     </button>
                                     <a class="button button-small" href="<?php echo admin_url('admin.php?page=jopg&action=view_album&album_id=' . $album->id); ?>">
-                                        View Photos
+                                        View
                                     </a>
+                                    <button class="button button-small jopg-hide-album" 
+                                            data-album-id="<?php echo $album->id; ?>"
+                                            style="color:#b32d2e;"
+                                            title="Hide this album — stops sync and gallery display">
+                                        ✕ Remove
+                                    </button>
+                                    <?php else: ?>
+                                    <button class="button button-small jopg-restore-album" 
+                                            data-album-id="<?php echo $album->id; ?>"
+                                            style="color:#00a32a;">
+                                        ↺ Restore
+                                    </button>
+                                    <?php endif; ?>
                                 </td>
                             </tr>
                         <?php endforeach; ?>

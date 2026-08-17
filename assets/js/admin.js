@@ -127,4 +127,67 @@
         });
         $('#jopg-no-results').toggle(visible === 0);
     });
+
+    // Hide (remove) album — stops sync and gallery display, clears cache
+    $(document).on('click', '.jopg-hide-album', function() {
+        var btn = $(this);
+        var albumId = btn.data('album-id');
+        var row = btn.closest('tr');
+        var albumName = row.find('strong').first().text();
+        
+        if (!confirm('Remove album "' + albumName + '"?\n\nThis will:\n• Hide it from the gallery\n• Stop it from being synced\n• Delete cached images\n\nYou can restore it later.')) return;
+        
+        btn.prop('disabled', true).text('Removing...');
+        $.post(jopg_admin.ajax_url, {
+            action: 'jopg_hide_album',
+            nonce: jopg_admin.nonce,
+            album_id: albumId
+        }, function(resp) {
+            if (resp.success) {
+                // Update the row in place — show Restore button, dim it
+                row.addClass('jopg-album-hidden');
+                row.find('td').first().find('span').remove();
+                row.find('td').first().append('<span style="color:#999;font-style:italic;font-size:12px;">(hidden)</span>');
+                row.find('td').last().html(
+                    '<button class="button button-small jopg-restore-album" data-album-id="' + albumId + '" style="color:#00a32a;">↺ Restore</button>'
+                );
+                // Move row to bottom of table
+                row.detach().appendTo('#jopg-album-table tbody');
+                var status = $('#jopg-prewarm-status');
+                status.html('<div style="color:#666;padding:8px;">✓ Album "' + albumName + '" hidden. Cache cleared (' + (resp.data.deleted_cache_files || 0) + ' files deleted).</div>');
+            } else {
+                alert('Failed: ' + (resp.data || 'Unknown error'));
+                btn.prop('disabled', false).text('✕ Remove');
+            }
+        }).fail(function() {
+            alert('Connection error');
+            btn.prop('disabled', false).text('✕ Remove');
+        });
+    });
+    
+    // Restore hidden album
+    $(document).on('click', '.jopg-restore-album', function() {
+        var btn = $(this);
+        var albumId = btn.data('album-id');
+        var row = btn.closest('tr');
+        var albumName = row.find('strong').first().text();
+        
+        btn.prop('disabled', true).text('Restoring...');
+        $.post(jopg_admin.ajax_url, {
+            action: 'jopg_restore_album',
+            nonce: jopg_admin.nonce,
+            album_id: albumId
+        }, function(resp) {
+            if (resp.success) {
+                // Reload page to re-sort the album into the active list
+                location.reload();
+            } else {
+                alert('Failed: ' + (resp.data || 'Unknown error'));
+                btn.prop('disabled', false).text('↺ Restore');
+            }
+        }).fail(function() {
+            alert('Connection error');
+            btn.prop('disabled', false).text('↺ Restore');
+        });
+    });
 })(jQuery);
