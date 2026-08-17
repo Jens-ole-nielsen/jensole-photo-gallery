@@ -49,7 +49,7 @@ class JOPG_Shortcodes {
             'rest_url' => rest_url('jopg/v1/'),
             'cart_url' => wc_get_cart_url() ?? '',
             'checkout_url' => wc_get_checkout_url() ?? '',
-            'currency' => get_woocommerce_currency() ?? 'DKK',
+            'currency' => get_woocommerce_currency() ?? 'EUR',
             'single_price' => JOPG_DB::get_setting('single_price', '49'),
             'bundle_qty' => JOPG_DB::get_setting('bundle_qty', '5'),
             'bundle_price' => JOPG_DB::get_setting('bundle_price', '200'),
@@ -183,7 +183,7 @@ class JOPG_Shortcodes {
         <div class="jopg-album" data-album-id="<?php echo $album->id; ?>">
             <p class="jopg-back-link"><a href="<?php echo esc_url(remove_query_arg('album')); ?>">← All galleries</a></p>
             <h2 class="jopg-album-title"><?php echo esc_html($album->title); ?></h2>
-            <p class="jopg-album-meta"><?php echo count($photos); ?> photos — <?php echo esc_html($single_price); ?> kr each or <?php echo esc_html($bundle_qty); ?> for <?php echo esc_html($bundle_price); ?> kr</p>
+            <p class="jopg-album-meta"><?php echo count($photos); ?> photos — <?php echo esc_html($single_price); ?> € each or <?php echo esc_html($bundle_qty); ?> for <?php echo esc_html($bundle_price); ?> €</p>
             
             <div class="jopg-photos-grid">
                 <?php foreach ($photos as $photo): 
@@ -209,7 +209,7 @@ class JOPG_Shortcodes {
                              data-full-url="<?php echo esc_url($wm_url); ?>">
                     </div>
                     <button class="jopg-add-cart" data-photo-id="<?php echo $photo->id; ?>">
-                        🛒 <?php echo esc_html($single_price); ?> kr
+                        🛒 <?php echo esc_html($single_price); ?> €
                     </button>
                 </div>
                 <?php endforeach; ?>

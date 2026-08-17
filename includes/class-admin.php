@@ -646,7 +646,7 @@ class JOPG_Admin {
                 <h3>Pricing</h3>
                 <table class="form-table">
                     <tr>
-                        <th>Single photo price (kr)</th>
+                        <th>Single photo price (€)</th>
                         <td><input type="number" name="single_price" step="0.01"
                             value="<?php echo esc_attr($s['single_price'] ?? '49'); ?>"></td>
                     </tr>
@@ -656,7 +656,7 @@ class JOPG_Admin {
                             value="<?php echo esc_attr($s['bundle_qty'] ?? '5'); ?>"></td>
                     </tr>
                     <tr>
-                        <th>Bundle price (kr)</th>
+                        <th>Bundle price (€)</th>
                         <td><input type="number" name="bundle_price" step="0.01"
                             value="<?php echo esc_attr($s['bundle_price'] ?? '200'); ?>"></td>
                     </tr>
