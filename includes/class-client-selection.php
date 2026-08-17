@@ -138,19 +138,45 @@ class JOPG_Client_Selection {
         global $wpdb;
         $table_photos = $wpdb->prefix . 'jopg_photos';
         $photos = $wpdb->get_results($wpdb->prepare(
-            "SELECT id, filename, title FROM $table_photos WHERE album_id = %d ORDER BY filename ASC",
+            "SELECT id, filename, title, thumb_url, display_url FROM $table_photos WHERE album_id = %d ORDER BY filename ASC",
             $selection->album_id
         ));
         
         $selected = json_decode($selection->selected_photos ?? '[]', true);
         
+        $upload_dir = wp_upload_dir();
+        $cache_dir = $upload_dir['basedir'] . '/jopg-cache';
+        
+        $watermarked_urls = array_map(function($p) use ($upload_dir, $cache_dir) {
+            // Use cached thumbnail if available (instant load)
+            $thumb_cache_file = $cache_dir . '/wm_thumb_out_' . $p->id . '.jpg';
+            if (file_exists($thumb_cache_file) && filesize($thumb_cache_file) > 100) {
+                $thumb_url = $upload_dir['baseurl'] . '/jopg-cache/wm_thumb_out_' . $p->id . '.jpg';
+            } else {
+                $thumb_url = JOPG_Watermark::get_thumb_url($p->id);
+            }
+            
+            // Full-size watermarked URL for lightbox (also check cache)
+            $full_cache_file = $cache_dir . '/wm_out_' . $p->id . '.jpg';
+            if (file_exists($full_cache_file) && filesize($full_cache_file) > 100) {
+                $full_url = $upload_dir['baseurl'] . '/jopg-cache/wm_out_' . $p->id . '.jpg';
+            } else {
+                $full_url = JOPG_Watermark::get_watermarked_url($p->id);
+            }
+            
+            return [
+                'id' => $p->id,
+                'thumb_url' => $thumb_url,
+                'full_url' => $full_url,
+                'url' => $thumb_url,  // backward compat
+            ];
+        }, $photos);
+        
         return [
             'selection' => $selection,
             'photos' => $photos,
             'selected' => $selected,
-            'watermarked_urls' => array_map(function($p) {
-                return ['id' => $p->id, 'url' => JOPG_Watermark::get_watermarked_url($p->id)];
-            }, $photos)
+            'watermarked_urls' => $watermarked_urls
         ];
     }
     

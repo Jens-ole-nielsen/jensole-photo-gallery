@@ -134,6 +134,10 @@
         initClientSelection();
     }
 
+    // Selection lightbox state
+    var selLightboxPhotos = [];
+    var selLightboxIdx = 0;
+
     function initClientSelection() {
         var container = $('#jopg-selection-app');
         var token = container.data('token') || new URLSearchParams(window.location.search).get('token');
@@ -151,15 +155,20 @@
             }
 
             var selected = data.selected || [];
+            selLightboxPhotos = data.watermarked_urls;
+            
             var html = '<h2>Select Your Favorites</h2>';
-            html += '<p class="jopg-album-meta">Click photos to select. When done, click "Submit Selection".</p>';
+            html += '<p class="jopg-album-meta">Click a photo to view it larger. Click the checkmark to select. When done, click "Submit Selection".</p>';
             html += '<div class="jopg-selection-grid">';
             
-            data.watermarked_urls.forEach(function(photo) {
+            data.watermarked_urls.forEach(function(photo, idx) {
                 var isSelected = selected.includes(photo.id);
-                html += '<div class="jopg-selection-photo' + (isSelected ? ' selected' : '') + '" data-photo-id="' + photo.id + '">';
-                html += '<img src="' + photo.url + '" loading="lazy">';
+                var thumbSrc = photo.thumb_url || photo.url;
+                var fullSrc = photo.full_url || photo.url;
+                html += '<div class="jopg-selection-photo' + (isSelected ? ' selected' : '') + '" data-photo-id="' + photo.id + '" data-idx="' + idx + '">';
+                html += '<img src="' + thumbSrc + '" loading="lazy" data-full-url="' + fullSrc + '">';
                 html += '<div class="jopg-select-check">' + (isSelected ? '✓' : '') + '</div>';
+                html += '<div class="jopg-zoom-hint">🔍</div>';
                 html += '</div>';
             });
             
@@ -169,22 +178,120 @@
             html += '<button id="jopg-submit-selection">Submit Selection</button>';
             html += '</div>';
             
+            // Lightbox HTML
+            html += '<div class="jopg-sel-lightbox" id="jopg-sel-lightbox" style="display:none;">';
+            html += '<div class="jopg-sel-lb-bg"></div>';
+            html += '<div class="jopg-sel-lb-content">';
+            html += '<img src="" id="jopg-sel-lb-img" alt="">';
+            html += '</div>';
+            html += '<div class="jopg-sel-lb-controls">';
+            html += '<button class="jopg-sel-lb-prev">←</button>';
+            html += '<button class="jopg-sel-lb-close">✕</button>';
+            html += '<button class="jopg-sel-lb-next">→</button>';
+            html += '<button class="jopg-sel-lb-toggle" id="jopg-sel-lb-toggle">✓ Select</button>';
+            html += '</div>';
+            html += '</div>';
+            
             container.html(html);
         }).fail(function() {
             container.html('<p>Could not load selection. The link may have expired.</p>');
         });
     }
 
-    // Toggle selection
-    $(document).on('click', '.jopg-selection-photo', function() {
-        $(this).toggleClass('selected');
-        var check = $(this).find('.jopg-select-check');
-        if ($(this).hasClass('selected')) {
+    // Click selection photo — open lightbox (not on checkmark)
+    $(document).on('click', '.jopg-selection-photo', function(e) {
+        // Don't open lightbox if clicking the checkmark
+        if ($(e.target).hasClass('jopg-select-check') || $(e.target).closest('.jopg-select-check').length) return;
+        
+        var idx = parseInt($(this).data('idx'));
+        selLightboxIdx = idx;
+        openSelLightbox();
+    });
+
+    // Click checkmark — toggle selection (don't open lightbox)
+    $(document).on('click', '.jopg-select-check', function(e) {
+        e.stopPropagation();
+        var photo = $(this).closest('.jopg-selection-photo');
+        photo.toggleClass('selected');
+        var check = photo.find('.jopg-select-check');
+        if (photo.hasClass('selected')) {
             check.html('✓');
         } else {
             check.html('');
         }
         $('#jopg-sel-count').text($('.jopg-selection-photo.selected').length);
+        // Update lightbox toggle button if open
+        updateSelLightboxToggle();
+    });
+
+    function openSelLightbox() {
+        var photo = selLightboxPhotos[selLightboxIdx];
+        if (!photo) return;
+        var url = photo.full_url || photo.url;
+        $('#jopg-sel-lb-img').attr('src', url);
+        $('#jopg-sel-lightbox').fadeIn(200);
+        updateSelLightboxToggle();
+    }
+
+    function updateSelLightboxToggle() {
+        var photo = selLightboxPhotos[selLightboxIdx];
+        if (!photo) return;
+        var photoEl = $('.jopg-selection-photo[data-photo-id="' + photo.id + '"]');
+        var isSelected = photoEl.hasClass('selected');
+        var btn = $('#jopg-sel-lb-toggle');
+        if (isSelected) {
+            btn.text('✕ Deselect').removeClass('jopg-sel-selected').addClass('jopg-sel-deselect');
+        } else {
+            btn.text('✓ Select').removeClass('jopg-sel-deselect').addClass('jopg-sel-selected');
+        }
+    }
+
+    // Lightbox navigation
+    $(document).on('click', '.jopg-sel-lb-prev', function(e) {
+        e.stopPropagation();
+        selLightboxIdx = (selLightboxIdx - 1 + selLightboxPhotos.length) % selLightboxPhotos.length;
+        openSelLightbox();
+    });
+    
+    $(document).on('click', '.jopg-sel-lb-next', function(e) {
+        e.stopPropagation();
+        selLightboxIdx = (selLightboxIdx + 1) % selLightboxPhotos.length;
+        openSelLightbox();
+    });
+
+    $(document).on('click', '.jopg-sel-lb-close', function(e) {
+        e.stopPropagation();
+        $('#jopg-sel-lightbox').fadeOut(200);
+    });
+
+    $(document).on('click', '.jopg-sel-lb-bg', function() {
+        $('#jopg-sel-lightbox').fadeOut(200);
+    });
+
+    // Toggle selection from lightbox
+    $(document).on('click', '#jopg-sel-lb-toggle', function(e) {
+        e.stopPropagation();
+        var photo = selLightboxPhotos[selLightboxIdx];
+        if (!photo) return;
+        var photoEl = $('.jopg-selection-photo[data-photo-id="' + photo.id + '"]');
+        photoEl.toggleClass('selected');
+        var check = photoEl.find('.jopg-select-check');
+        if (photoEl.hasClass('selected')) {
+            check.html('✓');
+        } else {
+            check.html('');
+        }
+        $('#jopg-sel-count').text($('.jopg-selection-photo.selected').length);
+        updateSelLightboxToggle();
+    });
+
+    // Keyboard nav in lightbox
+    $(document).on('keydown', function(e) {
+        if ($('#jopg-sel-lightbox').is(':visible')) {
+            if (e.key === 'Escape') $('.jopg-sel-lb-close').click();
+            if (e.key === 'ArrowLeft') $('.jopg-sel-lb-prev').click();
+            if (e.key === 'ArrowRight') $('.jopg-sel-lb-next').click();
+        }
     });
 
     // Submit selection
