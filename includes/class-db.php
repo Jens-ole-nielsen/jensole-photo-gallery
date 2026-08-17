@@ -161,6 +161,8 @@ class JOPG_DB {
     public static function deactivate() {
         // Keep data on deactivation
         wp_clear_scheduled_hook('jopg_sync_lightroom');
+        wp_clear_scheduled_hook('jopg_background_prewarm');
+        delete_option('jopg_prewarm_job');
     }
     
     public static function get_setting($key, $default = '') {

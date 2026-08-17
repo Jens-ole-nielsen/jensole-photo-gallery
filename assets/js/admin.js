@@ -150,61 +150,135 @@
     });
 
 
-    // Pre-warm image cache — per album
+    // Pre-warm image cache — BACKGROUND mode (WP cron, survives page close)
     $(document).on('click', '.jopg-prewarm-album', function() {
         var btn = $(this);
         var albumId = btn.data('album-id');
         var status = $('#jopg-prewarm-status');
         var originalText = btn.text();
-        btn.prop('disabled', true).text('🔥 Warming...');
-        status.html('<div style="padding:10px;background:#f0f0f0;border-radius:4px;">Pre-warming album #' + albumId + '...</div>');
         
-        var offset = 0;
-        var batchSize = 5;
-        var totalCached = 0;
-        var totalFailed = 0;
+        if (!confirm('Start background pre-warm?\n\nYou can close this page — it runs server-side every 2 minutes (10 images per run). Status is shown when you return.')) return;
         
-        function prewarmBatch() {
+        btn.prop('disabled', true).text('⏳ Starting...');
+        
+        $.post(jopg_admin.ajax_url, {
+            action: 'jopg_prewarm_background_start',
+            nonce: jopg_admin.nonce,
+            album_id: albumId
+        }, function(resp) {
+            if (!resp.success) {
+                status.html('<div style="color:red;padding:10px;">Error: ' + (resp.data || 'Unknown') + '</div>');
+                btn.prop('disabled', false).text(originalText);
+                return;
+            }
+            
+            btn.text('⏹ Stop Pre-warm').prop('disabled', false);
+            btn.addClass('jopg-prewarm-stop').removeClass('jopg-prewarm-album');
+            
+            // Start polling for status
+            startPrewarmPolling(albumId, btn, originalText);
+        }).fail(function() {
+            status.html('<div style="color:red;padding:10px;">Connection error.</div>');
+            btn.prop('disabled', false).text(originalText);
+        });
+    });
+    
+    // Stop background pre-warm
+    $(document).on('click', '.jopg-prewarm-stop', function() {
+        var btn = $(this);
+        var status = $('#jopg-prewarm-status');
+        var originalText = '🔥 Pre-warm';
+        
+        $.post(jopg_admin.ajax_url, {
+            action: 'jopg_prewarm_background_stop',
+            nonce: jopg_admin.nonce
+        }, function(resp) {
+            btn.removeClass('jopg-prewarm-stop').addClass('jopg-prewarm-album');
+            btn.text(originalText);
+            status.append('<div style="margin-top:8px;color:#666;">⏹ Pre-warm stopped.</div>');
+        }).fail(function() {
+            alert('Connection error');
+        });
+    });
+    
+    // Poll background pre-warm status every 5 seconds
+    var prewarmPollTimer = null;
+    function startPrewarmPolling(albumId, btn, originalText) {
+        var status = $('#jopg-prewarm-status');
+        
+        function poll() {
             $.post(jopg_admin.ajax_url, {
-                action: 'jopg_prewarm_cache',
-                nonce: jopg_admin.nonce,
-                offset: offset,
-                batch_size: batchSize,
-                album_id: albumId
+                action: 'jopg_prewarm_background_status',
+                nonce: jopg_admin.nonce
             }, function(resp) {
-                if (!resp.success) {
-                    status.html('<div style="color:red;padding:10px;">Error: ' + (resp.data || 'Unknown') + '</div>');
-                    btn.prop('disabled', false).text(originalText);
-                    return;
-                }
+                if (!resp.success) return;
                 
                 var d = resp.data;
-                totalCached += d.cached;
-                totalFailed += d.failed;
-                offset = d.done;
+                if (d.status === 'idle') return;
                 
-                var pct = d.total > 0 ? Math.round((d.done / d.total) * 100) : 100;
+                var pct = d.total > 0 ? Math.round((d.done / d.total) * 100) : 0;
                 var bar = '<div style="background:#ddd;border-radius:4px;height:24px;overflow:hidden;">' +
                     '<div style="background:#2271b1;height:100%;width:' + pct + '%;transition:width 0.3s;">' +
                     '<span style="color:#fff;font-size:12px;line-height:24px;padding-left:8px;">' + pct + '%</span></div></div>';
-                var msg = '<div style="margin-top:8px;">Album #' + albumId + ': ' + d.done + ' of ' + d.total + 
-                    ' — ✅ ' + totalCached + ' cached' + (totalFailed > 0 ? ', ❌ ' + totalFailed + ' failed' : '') + '</div>';
+                var msg = '<div style="margin-top:8px;">Background pre-warm: ' + d.done + ' of ' + d.total + 
+                    ' — ✅ ' + (d.cached || 0) + ' cached' + ((d.failed || 0) > 0 ? ', ❌ ' + d.failed + ' failed' : '') + 
+                    ' <span style="color:#666;font-size:11px;">(runs every 2 min, you can close this page)</span></div>';
                 status.html(bar + msg);
                 
-                if (d.remaining > 0) {
-                    setTimeout(prewarmBatch, 200);
-                } else {
-                    btn.prop('disabled', false).text(originalText);
-                    status.append('<div style="margin-top:8px;color:green;font-weight:bold;">✅ Album pre-warmed! ' + 
-                        totalCached + ' images cached. Gallery will load instantly for this album.</div>');
+                if (d.status === 'completed' || d.status === 'stopped') {
+                    clearInterval(prewarmPollTimer);
+                    prewarmPollTimer = null;
+                    btn.removeClass('jopg-prewarm-stop').addClass('jopg-prewarm-album');
+                    btn.text(originalText);
+                    if (d.status === 'completed') {
+                        status.append('<div style="margin-top:8px;color:green;font-weight:bold;">✅ Pre-warm complete! ' + 
+                            (d.cached || 0) + ' images cached. Gallery will load instantly.</div>');
+                    }
                 }
             }).fail(function() {
-                status.html('<div style="color:red;padding:10px;">Connection error. Try again.</div>');
-                btn.prop('disabled', false).text(originalText);
+                // Silent fail on polling — don't spam errors
             });
         }
         
-        prewarmBatch();
+        poll(); // Immediate first poll
+        prewarmPollTimer = setInterval(poll, 5000);
+    }
+    
+    // On page load: check if a background pre-warm is already running
+    $(document).ready(function() {
+        var status = $('#jopg-prewarm-status');
+        if (!status.length) return;
+        
+        $.post(jopg_admin.ajax_url, {
+            action: 'jopg_prewarm_background_status',
+            nonce: jopg_admin.nonce
+        }, function(resp) {
+            if (!resp.success) return;
+            var d = resp.data;
+            if (d.status === 'idle' || d.status === undefined) return;
+            
+            // A background job is running or completed — show status
+            var pct = d.total > 0 ? Math.round((d.done / d.total) * 100) : 0;
+            var stateLabel = d.status === 'running' ? '🔄 Running' : (d.status === 'completed' ? '✅ Completed' : '⏹ Stopped');
+            var bar = '<div style="background:#ddd;border-radius:4px;height:24px;overflow:hidden;">' +
+                '<div style="background:#2271b1;height:100%;width:' + pct + '%;transition:width 0.3s;">' +
+                '<span style="color:#fff;font-size:12px;line-height:24px;padding-left:8px;">' + pct + '%</span></div></div>';
+            var msg = '<div style="margin-top:8px;">' + stateLabel + ' — Background pre-warm: ' + d.done + ' of ' + d.total + 
+                ' — ✅ ' + (d.cached || 0) + ' cached' + ((d.failed || 0) > 0 ? ', ❌ ' + d.failed + ' failed' : '') + '</div>';
+            status.html(bar + msg);
+            
+            if (d.status === 'running') {
+                // Update the pre-warm button to show stop state
+                $('.jopg-prewarm-album').each(function() {
+                    if (parseInt($(this).data('album-id')) === parseInt(d.album_id)) {
+                        $(this).text('⏹ Stop Pre-warm');
+                        $(this).addClass('jopg-prewarm-stop').removeClass('jopg-prewarm-album');
+                    }
+                });
+                // Start polling
+                startPrewarmPolling(d.album_id, $('.jopg-prewarm-stop'), '🔥 Pre-warm');
+            }
+        }).fail(function() {});
     });
 
     // Album search filter

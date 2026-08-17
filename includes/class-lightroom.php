@@ -28,6 +28,11 @@ class JOPG_Lightroom {
         add_action('wp_ajax_jopg_import_album', [$this, 'ajax_import_album']);
         add_action('wp_ajax_jopg_prewarm_cache', [$this, 'ajax_prewarm_cache']);
         add_action('wp_ajax_jopg_import_album_batch', [$this, 'ajax_import_album_batch']);
+        add_action('wp_ajax_jopg_prewarm_background_start', [$this, 'ajax_prewarm_background_start']);
+        add_action('wp_ajax_jopg_prewarm_background_status', [$this, 'ajax_prewarm_background_status']);
+        add_action('wp_ajax_jopg_prewarm_background_stop', [$this, 'ajax_prewarm_background_stop']);
+        add_action('jopg_background_prewarm', [$this, 'cron_prewarm_batch']);
+        add_filter('cron_schedules', [$this, 'add_cron_interval']);
         add_action('wp_ajax_jopg_hide_album', [$this, 'ajax_hide_album']);
         add_action('wp_ajax_jopg_restore_album', [$this, 'ajax_restore_album']);
         add_action('wp_ajax_jopg_assign_gallery', [$this, 'ajax_assign_gallery']);
@@ -958,5 +963,193 @@ class JOPG_Lightroom {
      */
     public function get_connect_url() {
         return wp_nonce_url(admin_url('admin-post.php?action=jopg_lightroom_connect'), 'jopg_lightroom_connect');
+    }
+    
+    /**
+     * Add a 2-minute cron interval for background pre-warming.
+     */
+    public function add_cron_interval($schedules) {
+        $schedules['jopg_every_2min'] = [
+            'interval' => 120,
+            'display' => 'Every 2 Minutes (JOPG Pre-warm)',
+        ];
+        return $schedules;
+    }
+    
+    /**
+     * AJAX: Start background pre-warm for an album (or all albums).
+     * Schedules a WP cron job that runs every 2 minutes, processing
+     * a batch of images each time. User can close the browser.
+     */
+    public function ajax_prewarm_background_start() {
+        check_ajax_referer('jopg_admin', 'nonce');
+        if (!current_user_can('manage_options')) wp_send_json_error('Permission denied');
+        
+        $album_id = intval($_POST['album_id'] ?? 0);
+        
+        // Count how many photos need caching
+        global $wpdb;
+        $table_photos = $wpdb->prefix . 'jopg_photos';
+        $where = $album_id > 0 ? $wpdb->prepare("WHERE album_id = %d", $album_id) : '';
+        $total = intval($wpdb->get_var("SELECT COUNT(*) FROM $table_photos $where"));
+        
+        if ($total === 0) {
+            wp_send_json_error('No photos to pre-warm');
+        }
+        
+        // Store job state in a WP option
+        $job = [
+            'album_id' => $album_id,
+            'total' => $total,
+            'done' => 0,
+            'cached' => 0,
+            'failed' => 0,
+            'status' => 'running',
+            'started_at' => current_time('mysql'),
+            'updated_at' => current_time('mysql'),
+            'last_batch_size' => 0,
+        ];
+        update_option('jopg_prewarm_job', $job, false);
+        
+        // Schedule the cron — runs every 2 minutes
+        if (!wp_next_scheduled('jopg_background_prewarm')) {
+            wp_schedule_event(time() + 10, 'jopg_every_2min', 'jopg_background_prewarm');
+        }
+        
+        wp_send_json_success([
+            'message' => 'Background pre-warm started',
+            'total' => $total,
+            'album_id' => $album_id,
+        ]);
+    }
+    
+    /**
+     * AJAX: Check background pre-warm status (polled by admin JS).
+     */
+    public function ajax_prewarm_background_status() {
+        check_ajax_referer('jopg_admin', 'nonce');
+        if (!current_user_can('manage_options')) wp_send_json_error('Permission denied');
+        
+        $job = get_option('jopg_prewarm_job', null);
+        if (!$job) {
+            wp_send_json_success(['status' => 'idle']);
+        }
+        
+        wp_send_json_success($job);
+    }
+    
+    /**
+     * AJAX: Stop background pre-warm.
+     */
+    public function ajax_prewarm_background_stop() {
+        check_ajax_referer('jopg_admin', 'nonce');
+        if (!current_user_can('manage_options')) wp_send_json_error('Permission denied');
+        
+        wp_clear_scheduled_hook('jopg_background_prewarm');
+        
+        $job = get_option('jopg_prewarm_job', null);
+        if ($job) {
+            $job['status'] = 'stopped';
+            $job['updated_at'] = current_time('mysql');
+            update_option('jopg_prewarm_job', $job, false);
+        }
+        
+        wp_send_json_success(['message' => 'Background pre-warm stopped']);
+    }
+    
+    /**
+     * CRON handler: Process one batch of pre-warm images server-side.
+     * Runs every 2 minutes via WP cron. Processes 10 images per run.
+     */
+    public function cron_prewarm_batch() {
+        $job = get_option('jopg_prewarm_job', null);
+        if (!$job || $job['status'] !== 'running') {
+            // Job is done or stopped — unschedule
+            wp_clear_scheduled_hook('jopg_background_prewarm');
+            return;
+        }
+        
+        // Double check we're not already running (prevent overlap)
+        if (isset($job['lock']) && $job['lock'] > (time() - 300)) {
+            return; // Another process is still working (within 5 min)
+        }
+        
+        $job['lock'] = time();
+        update_option('jopg_prewarm_job', $job, false);
+        
+        global $wpdb;
+        $table_photos = $wpdb->prefix . 'jopg_photos';
+        
+        $album_id = intval($job['album_id']);
+        $offset = intval($job['done']);
+        $batch_size = 10; // 10 images per cron run
+        
+        $where = $album_id > 0 ? $wpdb->prepare("WHERE album_id = %d", $album_id) : '';
+        $photos = $wpdb->get_results($wpdb->prepare(
+            "SELECT id, thumb_url, display_url FROM $table_photos $where ORDER BY id ASC LIMIT %d OFFSET %d",
+            $batch_size, $offset
+        ));
+        
+        if (empty($photos)) {
+            // No more photos — job is done
+            $job['status'] = 'completed';
+            $job['updated_at'] = current_time('mysql');
+            unset($job['lock']);
+            update_option('jopg_prewarm_job', $job, false);
+            wp_clear_scheduled_hook('jopg_background_prewarm');
+            return;
+        }
+        
+        $cached = 0;
+        $failed = 0;
+        
+        foreach ($photos as $photo) {
+            // Pre-generate thumbnail
+            $this->pregenerate_thumbnail($photo->id, $photo->thumb_url);
+            
+            // Pre-generate display-size watermarked image
+            if (!empty($photo->display_url)) {
+                $upload_dir = wp_upload_dir();
+                $cache_dir = $upload_dir['basedir'] . '/jopg-cache';
+                $out_file = $cache_dir . '/wm_out_' . $photo->id . '.jpg';
+                
+                if (!file_exists($out_file) || (time() - filemtime($out_file)) > (7 * DAY_IN_SECONDS)) {
+                    $result = $this->fetch_rendition_bytes($photo->display_url);
+                    if (!is_wp_error($result)) {
+                        $image = @imagecreatefromstring($result['body']);
+                        if ($image !== false) {
+                            $wm = JOPG_Watermark::instance();
+                            $image = $wm->apply_watermark($image);
+                            imagejpeg($image, $out_file, 90);
+                            imagedestroy($image);
+                        }
+                    }
+                }
+            }
+            
+            // Verify
+            $thumb_cache = wp_upload_dir()['basedir'] . '/jopg-cache/wm_thumb_out_' . $photo->id . '.jpg';
+            if (file_exists($thumb_cache) && filesize($thumb_cache) > 100) {
+                $cached++;
+            } else {
+                $failed++;
+            }
+        }
+        
+        // Update job state
+        $job['done'] = $offset + count($photos);
+        $job['cached'] = intval($job['cached']) + $cached;
+        $job['failed'] = intval($job['failed']) + $failed;
+        $job['last_batch_size'] = count($photos);
+        $job['updated_at'] = current_time('mysql');
+        unset($job['lock']);
+        
+        // Check if we're done
+        if ($job['done'] >= $job['total']) {
+            $job['status'] = 'completed';
+            wp_clear_scheduled_hook('jopg_background_prewarm');
+        }
+        
+        update_option('jopg_prewarm_job', $job, false);
     }
 }
