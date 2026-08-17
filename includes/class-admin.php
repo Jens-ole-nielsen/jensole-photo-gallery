@@ -245,6 +245,7 @@ class JOPG_Admin {
                         <tr>
                             <th>Album</th>
                             <th>Gallery</th>
+                            <th>Sync Filter <span title="Only photos matching this filter are imported. Doesn't affect already-imported photos — use the cleanup button for that." style="cursor:help;">ⓘ</span></th>
                             <th>Lightroom Photos</th>
                             <th>Imported</th>
                             <th>Last Synced</th>
@@ -274,6 +275,19 @@ class JOPG_Admin {
                                         <?php endforeach; ?>
                                     </select>
                                 </td>
+                                <td>
+                                    <select class="jopg-album-flag-filter" data-album-id="<?php echo $album->id; ?>" style="width:100%;margin-bottom:4px;">
+                                        <option value="all" <?php selected($album->filter_flag ?? 'all', 'all'); ?>>Alle billeder</option>
+                                        <option value="flagged" <?php selected($album->filter_flag ?? 'all', 'flagged'); ?>>Kun Flagged (🚩 Pick)</option>
+                                        <option value="not_rejected" <?php selected($album->filter_flag ?? 'all', 'not_rejected'); ?>>Skjul Rejected (❌)</option>
+                                    </select>
+                                    <select class="jopg-album-rating-filter" data-album-id="<?php echo $album->id; ?>" style="width:100%;">
+                                        <option value="0" <?php selected(intval($album->filter_min_rating ?? 0), 0); ?>>Alle stjerner</option>
+                                        <?php for ($i = 1; $i <= 5; $i++): ?>
+                                        <option value="<?php echo $i; ?>" <?php selected(intval($album->filter_min_rating ?? 0), $i); ?>><?php echo str_repeat('★', $i); ?>+ </option>
+                                        <?php endfor; ?>
+                                    </select>
+                                </td>
                                 <td><?php echo $album->photo_count; ?></td>
                                 <td><?php echo $album->local_photo_count; ?></td>
                                 <td><?php echo $album->synced_at ?: '—'; ?></td>
@@ -287,6 +301,14 @@ class JOPG_Admin {
                                             data-album-id="<?php echo $album->id; ?>">
                                         🔥 Pre-warm
                                     </button>
+                                    <?php if (($album->filter_flag ?? 'all') !== 'all' || intval($album->filter_min_rating ?? 0) > 0): ?>
+                                    <button class="button button-small jopg-cleanup-filtered" 
+                                            data-album-id="<?php echo $album->id; ?>"
+                                            style="color:#b32d2e;"
+                                            title="Delete already-imported photos that don't match the current filter">
+                                        🧹 Ryd ikke-matchende
+                                    </button>
+                                    <?php endif; ?>
                                     <a class="button button-small" href="<?php echo admin_url('admin.php?page=jopg&action=view_album&album_id=' . $album->id); ?>">
                                         View
                                     </a>
@@ -463,12 +485,21 @@ class JOPG_Admin {
                 <div style="display:grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap:12px; margin-top:20px;">
                     <?php foreach ($photos as $photo): 
                         $wm_url = JOPG_Watermark::get_watermarked_url($photo->id);
+                        $rating = intval($photo->rating ?? 0);
+                        $flag = $photo->flag ?? 'unflagged';
+                        $flag_icon = $flag === 'flagged' ? '🚩' : ($flag === 'rejected' ? '❌' : '');
                     ?>
-                        <div style="border:1px solid #ddd; border-radius:6px; overflow:hidden; background:#1a1a1a;">
+                        <div style="border:1px solid #ddd; border-radius:6px; overflow:hidden; background:#1a1a1a; position:relative;">
                             <img src="<?php echo esc_url($wm_url); ?>" 
                                  alt="<?php echo esc_attr($photo->filename); ?>"
                                  loading="lazy"
                                  style="width:100%; aspect-ratio:3/2; object-fit:cover; display:block;">
+                            <?php if ($flag_icon || $rating > 0): ?>
+                            <div style="position:absolute; top:6px; left:6px; background:rgba(0,0,0,0.7); color:#fff; font-size:11px; padding:2px 7px; border-radius:4px; line-height:1.6;">
+                                <?php if ($flag_icon): ?><span title="<?php echo esc_attr($flag); ?>"><?php echo $flag_icon; ?></span><?php endif; ?>
+                                <?php if ($rating > 0): ?><span style="color:#ffd54a;"><?php echo str_repeat('★', $rating); ?></span><?php endif; ?>
+                            </div>
+                            <?php endif; ?>
                             <div style="padding:6px 8px; font-size:11px; color:#999;">
                                 <?php echo esc_html($photo->filename); ?>
                             </div>

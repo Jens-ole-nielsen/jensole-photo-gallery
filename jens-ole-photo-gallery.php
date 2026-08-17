@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Jens Ole Photo Gallery
  * Description: Custom photo gallery with Lightroom sync, watermarking, WooCommerce sales, and client selection.
- * Version: 1.4.1
+ * Version: 1.5.0
  * Author: Jens Ole Photography
  * Text Domain: jopg
  * Requires at least: 6.0
@@ -12,7 +12,7 @@
 
 if (!defined('ABSPATH')) exit;
 
-define('JOPG_VERSION', '1.4.1');
+define('JOPG_VERSION', '1.5.0');
 define('JOPG_PATH', plugin_dir_path(__FILE__));
 define('JOPG_URL', plugin_dir_url(__FILE__));
 define('JOPG_DB_VERSION', '1.0');
@@ -100,6 +100,19 @@ class Jens_Ole_Photo_Gallery {
         $has_gallery_col = $wpdb->get_results("SHOW COLUMNS FROM {$table_albums} LIKE 'gallery_id'");
         if (empty($has_gallery_col)) {
             $wpdb->query("ALTER TABLE {$table_albums} ADD COLUMN gallery_id bigint(20) DEFAULT 0 AFTER cover_url, ADD KEY gallery_id (gallery_id)");
+        }
+        
+        // 2b. Add per-album sync filter columns (flag + min star rating) if missing
+        $has_filter_flag_col = $wpdb->get_results("SHOW COLUMNS FROM {$table_albums} LIKE 'filter_flag'");
+        if (empty($has_filter_flag_col)) {
+            $wpdb->query("ALTER TABLE {$table_albums} ADD COLUMN filter_flag varchar(20) DEFAULT 'all', ADD COLUMN filter_min_rating tinyint(1) DEFAULT 0");
+        }
+        
+        // 2c. Add rating + flag columns to photos table if missing (from Lightroom's payload.rating / payload.flag)
+        $table_photos = $wpdb->prefix . 'jopg_photos';
+        $has_rating_col = $wpdb->get_results("SHOW COLUMNS FROM {$table_photos} LIKE 'rating'");
+        if (empty($has_rating_col)) {
+            $wpdb->query("ALTER TABLE {$table_photos} ADD COLUMN rating tinyint(1) DEFAULT 0, ADD COLUMN flag varchar(20) DEFAULT 'unflagged'");
         }
         
         // 3. Ensure all existing tables are up to date (runs dbDelta silently)

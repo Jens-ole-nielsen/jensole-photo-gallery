@@ -31,6 +31,8 @@ class JOPG_Lightroom {
         add_action('wp_ajax_jopg_prewarm_background_start', [$this, 'ajax_prewarm_background_start']);
         add_action('wp_ajax_jopg_prewarm_background_status', [$this, 'ajax_prewarm_background_status']);
         add_action('wp_ajax_jopg_prewarm_background_stop', [$this, 'ajax_prewarm_background_stop']);
+        add_action('wp_ajax_jopg_set_album_filter', [$this, 'ajax_set_album_filter']);
+        add_action('wp_ajax_jopg_cleanup_filtered_photos', [$this, 'ajax_cleanup_filtered_photos']);
         add_action('jopg_background_prewarm', [$this, 'cron_prewarm_batch']);
         add_filter('cron_schedules', [$this, 'add_cron_interval']);
         add_action('wp_ajax_jopg_hide_album', [$this, 'ajax_hide_album']);
@@ -537,6 +539,19 @@ class JOPG_Lightroom {
         $assets = $this->get_album_assets($album->lightroom_catalog_id, $album->lightroom_album_id);
         if (is_wp_error($assets)) return $assets;
         
+        // Apply this album's sync filter (flag + min star rating) BEFORE counting/slicing,
+        // so the progress bar and batching only ever see the photos we actually want.
+        $filter_flag = $album->filter_flag ?? 'all';
+        $min_rating = intval($album->filter_min_rating ?? 0);
+        
+        if ($filter_flag !== 'all' || $min_rating > 0) {
+            $assets = array_values(array_filter($assets, function($item) use ($filter_flag, $min_rating) {
+                $asset = $item['asset'] ?? $item;
+                $payload = $asset['payload'] ?? [];
+                return $this->photo_matches_filter($payload['flag'] ?? 'unflagged', $payload['rating'] ?? 0, $filter_flag, $min_rating);
+            }));
+        }
+        
         $total_assets = count($assets);
         
         // Apply offset/limit for batched import
@@ -584,6 +599,8 @@ class JOPG_Lightroom {
                 'height' => intval($height),
                 'capture_date' => $capture_date ? date('Y-m-d H:i:s', strtotime($capture_date)) : null,
                 'exif_data' => json_encode($payload),
+                'rating' => intval($payload['rating'] ?? 0),
+                'flag' => $payload['flag'] ?? 'unflagged',
                 'price' => $price,
             ];
             
@@ -619,6 +636,118 @@ class JOPG_Lightroom {
             'limit' => $limit,
             'is_final_batch' => $is_final_batch,
         ];
+    }
+    
+    /**
+     * Check whether a photo's flag/rating satisfies an album's sync filter.
+     * $filter_flag: 'all' (no filter) | 'flagged' (Pick only) | 'not_rejected' (exclude Reject)
+     * $min_rating: 0 (no filter) or 1-5 (minimum stars required)
+     */
+    private function photo_matches_filter($flag, $rating, $filter_flag, $min_rating) {
+        $flag = $flag ?: 'unflagged';
+        $rating = intval($rating);
+        
+        if ($filter_flag === 'flagged' && $flag !== 'flagged') return false;
+        if ($filter_flag === 'not_rejected' && $flag === 'rejected') return false;
+        if ($min_rating > 0 && $rating < $min_rating) return false;
+        
+        return true;
+    }
+    
+    /**
+     * AJAX: Save an album's sync filter (flag requirement + min star rating).
+     * Applied on the NEXT import — does not touch already-imported photos.
+     */
+    public function ajax_set_album_filter() {
+        check_ajax_referer('jopg_admin', 'nonce');
+        if (!current_user_can('manage_options')) wp_send_json_error('Permission denied');
+        
+        global $wpdb;
+        $table_albums = $wpdb->prefix . 'jopg_albums';
+        
+        $album_id = intval($_POST['album_id'] ?? 0);
+        $filter_flag = sanitize_text_field($_POST['filter_flag'] ?? 'all');
+        $min_rating = intval($_POST['min_rating'] ?? 0);
+        
+        if (!$album_id) wp_send_json_error('Invalid album ID');
+        if (!in_array($filter_flag, ['all', 'flagged', 'not_rejected'], true)) $filter_flag = 'all';
+        $min_rating = max(0, min(5, $min_rating));
+        
+        $wpdb->update($table_albums, [
+            'filter_flag' => $filter_flag,
+            'filter_min_rating' => $min_rating,
+        ], ['id' => $album_id]);
+        
+        wp_send_json_success([
+            'album_id' => $album_id,
+            'filter_flag' => $filter_flag,
+            'min_rating' => $min_rating,
+        ]);
+    }
+    
+    /**
+     * AJAX: Delete already-imported photos that don't match the album's
+     * CURRENT sync filter. Useful when you tighten a filter after already
+     * importing everything (e.g. large albums synced before filters existed).
+     * Removes the WooCommerce product and cached files too.
+     */
+    public function ajax_cleanup_filtered_photos() {
+        check_ajax_referer('jopg_admin', 'nonce');
+        if (!current_user_can('manage_options')) wp_send_json_error('Permission denied');
+        
+        global $wpdb;
+        $table_albums = $wpdb->prefix . 'jopg_albums';
+        $table_photos = $wpdb->prefix . 'jopg_photos';
+        
+        $album_id = intval($_POST['album_id'] ?? 0);
+        if (!$album_id) wp_send_json_error('Invalid album ID');
+        
+        $album = $wpdb->get_row($wpdb->prepare("SELECT * FROM $table_albums WHERE id = %d", $album_id));
+        if (!$album) wp_send_json_error('Album not found');
+        
+        $filter_flag = $album->filter_flag ?? 'all';
+        $min_rating = intval($album->filter_min_rating ?? 0);
+        
+        if ($filter_flag === 'all' && $min_rating === 0) {
+            wp_send_json_error('This album has no sync filter set — nothing to clean up.');
+        }
+        
+        $photos = $wpdb->get_results($wpdb->prepare("SELECT * FROM $table_photos WHERE album_id = %d", $album_id));
+        
+        $upload_dir = wp_upload_dir();
+        $cache_dir = $upload_dir['basedir'] . '/jopg-cache';
+        $deleted = 0;
+        
+        foreach ($photos as $photo) {
+            if ($this->photo_matches_filter($photo->flag, $photo->rating, $filter_flag, $min_rating)) {
+                continue; // matches filter — keep it
+            }
+            
+            // Delete WooCommerce product if one was created
+            if (!empty($photo->wc_product_id) && class_exists('WooCommerce')) {
+                wp_delete_post($photo->wc_product_id, true);
+            }
+            
+            // Delete cached image files
+            foreach ([
+                $cache_dir . '/wm_thumb_out_' . $photo->id . '.jpg',
+                $cache_dir . '/wm_out_' . $photo->id . '.jpg',
+                $cache_dir . '/wm_thumb_' . $photo->id . '.jpg',
+            ] as $file) {
+                if (file_exists($file)) @unlink($file);
+            }
+            
+            $wpdb->delete($table_photos, ['id' => $photo->id]);
+            $deleted++;
+        }
+        
+        $db_count = intval($wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM $table_photos WHERE album_id = %d", $album_id)));
+        $wpdb->update($table_albums, ['photo_count' => $db_count], ['id' => $album_id]);
+        
+        wp_send_json_success([
+            'deleted' => $deleted,
+            'remaining' => $db_count,
+        ]);
     }
     
     /**

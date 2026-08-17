@@ -383,4 +383,62 @@
             select.css('background', originalColor);
         });
     });
+
+    // Save album sync filter (flag requirement + min star rating) — instant save
+    $(document).on('change', '.jopg-album-flag-filter, .jopg-album-rating-filter', function() {
+        var select = $(this);
+        var row = select.closest('tr');
+        var albumId = select.data('album-id');
+        var flagFilter = row.find('.jopg-album-flag-filter').val();
+        var minRating = row.find('.jopg-album-rating-filter').val();
+        var originalColor = select.css('background');
+        
+        select.css('background', '#fff8e1');
+        $.post(jopg_admin.ajax_url, {
+            action: 'jopg_set_album_filter',
+            nonce: jopg_admin.nonce,
+            album_id: albumId,
+            filter_flag: flagFilter,
+            min_rating: minRating
+        }, function(resp) {
+            if (resp.success) {
+                select.css('background', '#d4edda');
+                // Reload so the "🧹 Ryd ikke-matchende" button appears/disappears correctly
+                setTimeout(function() { location.reload(); }, 600);
+            } else {
+                alert('Failed: ' + (resp.data || 'Unknown error'));
+                select.css('background', originalColor);
+            }
+        }).fail(function() {
+            alert('Connection error');
+            select.css('background', originalColor);
+        });
+    });
+
+    // Clean up already-imported photos that no longer match the album's sync filter
+    $(document).on('click', '.jopg-cleanup-filtered', function() {
+        var btn = $(this);
+        var albumId = btn.data('album-id');
+        var originalText = btn.text();
+        
+        if (!confirm('Delete already-imported photos in this album that don\'t match its current sync filter?\n\nThis removes their WooCommerce products and cached images too. Cannot be undone.')) return;
+        
+        btn.prop('disabled', true).text('Cleaning...');
+        $.post(jopg_admin.ajax_url, {
+            action: 'jopg_cleanup_filtered_photos',
+            nonce: jopg_admin.nonce,
+            album_id: albumId
+        }, function(resp) {
+            if (resp.success) {
+                alert('Removed ' + resp.data.deleted + ' photos that didn\'t match. ' + resp.data.remaining + ' remain.');
+                location.reload();
+            } else {
+                alert('Failed: ' + (resp.data || 'Unknown error'));
+                btn.prop('disabled', false).text(originalText);
+            }
+        }).fail(function() {
+            alert('Connection error');
+            btn.prop('disabled', false).text(originalText);
+        });
+    });
 })(jQuery);
