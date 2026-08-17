@@ -232,7 +232,7 @@ class JOPG_WooCommerce {
     }
     
     /**
-     * Apply bundle discount — e.g. 5 photos for 200 €
+     * Apply bundle discount — e.g. 5 photos for 200 (currency follows WooCommerce settings)
      */
     public function apply_bundle_discount($cart) {
         $bundle_qty = intval(JOPG_DB::get_setting('bundle_qty', '5'));

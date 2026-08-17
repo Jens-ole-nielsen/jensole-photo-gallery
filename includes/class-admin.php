@@ -644,9 +644,10 @@ class JOPG_Admin {
                 </script>
                 
                 <h3>Pricing</h3>
+                <?php $_jopg_sym = function_exists('get_woocommerce_currency_symbol') ? get_woocommerce_currency_symbol() : '€'; ?>
                 <table class="form-table">
                     <tr>
-                        <th>Single photo price (€)</th>
+                        <th>Single photo price (<?php echo esc_html($_jopg_sym); ?>)</th>
                         <td><input type="number" name="single_price" step="0.01"
                             value="<?php echo esc_attr($s['single_price'] ?? '49'); ?>"></td>
                     </tr>
@@ -656,7 +657,7 @@ class JOPG_Admin {
                             value="<?php echo esc_attr($s['bundle_qty'] ?? '5'); ?>"></td>
                     </tr>
                     <tr>
-                        <th>Bundle price (€)</th>
+                        <th>Bundle price (<?php echo esc_html($_jopg_sym); ?>)</th>
                         <td><input type="number" name="bundle_price" step="0.01"
                             value="<?php echo esc_attr($s['bundle_price'] ?? '200'); ?>"></td>
                     </tr>
