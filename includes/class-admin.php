@@ -128,12 +128,30 @@ class JOPG_Admin {
             global $wpdb;
             $table_photos = $wpdb->prefix . 'jopg_photos';
             $price = floatval(JOPG_DB::get_setting('single_price', '49'));
+            
+            // Update jopg_photos.price field
             $updated = $wpdb->query($wpdb->prepare(
                 "UPDATE $table_photos SET price = %f",
                 $price
             ));
-            add_action('admin_notices', function() use ($updated) {
-                echo '<div class="notice notice-success is-dismissible"><p>Applied new price to ' . intval($updated) . ' photos.</p></div>';
+            
+            // Also update all linked WooCommerce products so cart shows correct price
+            $wc_updated = 0;
+            if (class_exists('WooCommerce')) {
+                $photos = $wpdb->get_results("SELECT id, wc_product_id FROM $table_photos WHERE wc_product_id IS NOT NULL AND wc_product_id > 0");
+                foreach ($photos as $photo) {
+                    $product = wc_get_product($photo->wc_product_id);
+                    if ($product) {
+                        $product->set_price($price);
+                        $product->set_regular_price($price);
+                        $product->save();
+                        $wc_updated++;
+                    }
+                }
+            }
+            
+            add_action('admin_notices', function() use ($updated, $wc_updated) {
+                echo '<div class="notice notice-success is-dismissible"><p>Applied new price to ' . intval($updated) . ' photos' . ($wc_updated > 0 ? ' and updated ' . $wc_updated . ' WooCommerce products' : '') . '.</p></div>';
             });
         }
         

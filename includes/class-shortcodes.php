@@ -188,12 +188,9 @@ class JOPG_Shortcodes {
                              loading="lazy"
                              data-full-url="<?php echo esc_url($wm_url); ?>">
                     </div>
-                    <div class="jopg-photo-overlay">
-                        <button class="jopg-add-cart" data-photo-id="<?php echo $photo->id; ?>">
-                            🛒 Add to cart
-                        </button>
-                        <span class="jopg-price"><?php echo esc_html($single_price); ?> kr</span>
-                    </div>
+                    <button class="jopg-add-cart" data-photo-id="<?php echo $photo->id; ?>">
+                        🛒 <?php echo esc_html($single_price); ?> kr
+                    </button>
                 </div>
                 <?php endforeach; ?>
             </div>
