@@ -190,4 +190,31 @@
             btn.prop('disabled', false).text('↺ Restore');
         });
     });
+
+    // Assign album to gallery — instant save on dropdown change
+    $(document).on('change', '.jopg-album-gallery-select', function() {
+        var select = $(this);
+        var albumId = select.data('album-id');
+        var galleryId = select.val();
+        var originalColor = select.css('background');
+        
+        select.css('background', '#fff8e1');
+        $.post(jopg_admin.ajax_url, {
+            action: 'jopg_assign_gallery',
+            nonce: jopg_admin.nonce,
+            album_id: albumId,
+            gallery_id: galleryId
+        }, function(resp) {
+            if (resp.success) {
+                select.css('background', '#d4edda');
+                setTimeout(function() { select.css('background', originalColor); }, 1000);
+            } else {
+                alert('Failed: ' + (resp.data || 'Unknown error'));
+                select.css('background', originalColor);
+            }
+        }).fail(function() {
+            alert('Connection error');
+            select.css('background', originalColor);
+        });
+    });
 })(jQuery);

@@ -60,6 +60,8 @@ class JOPG_Shortcodes {
      * Render gallery overview — all albums, OR a single album if ?album=X is in the URL
      */
     public function render_gallery($atts) {
+        $atts = shortcode_atts(['gallery' => ''], $atts);
+        
         // If an album is requested via URL param, delegate to single album view
         if (isset($_GET['album'])) {
             return $this->render_single_album($atts);
@@ -68,18 +70,36 @@ class JOPG_Shortcodes {
         global $wpdb;
         $table_albums = $wpdb->prefix . 'jopg_albums';
         $table_photos = $wpdb->prefix . 'jopg_photos';
+        $table_galleries = $wpdb->prefix . 'jopg_galleries';
+        
+        // Build query — filter by gallery if specified
+        $gallery_filter = '';
+        $gallery_name = '';
+        if (!empty($atts['gallery'])) {
+            $gallery_slug = sanitize_title($atts['gallery']);
+            $gallery = $wpdb->get_row($wpdb->prepare(
+                "SELECT * FROM $table_galleries WHERE slug = %s", $gallery_slug
+            ));
+            if ($gallery) {
+                $gallery_filter = $wpdb->prepare(" AND a.gallery_id = %d", $gallery->id);
+                $gallery_name = $gallery->name;
+            } else {
+                // Gallery slug not found — show empty state
+                return '<p class="jopg-empty">Gallery "' . esc_html($atts['gallery']) . '" not found. Create it in Photo Gallery → Galleries first.</p>';
+            }
+        }
         
         $albums = $wpdb->get_results("SELECT a.*, 
             (SELECT COUNT(*) FROM {$table_photos} p WHERE p.album_id = a.id) as photo_count,
             (SELECT id FROM {$table_photos} p WHERE p.album_id = a.id ORDER BY p.id ASC LIMIT 1) as cover_photo_id
             FROM $table_albums a WHERE a.status = 'active' 
-            AND EXISTS (SELECT 1 FROM {$table_photos} p WHERE p.album_id = a.id)
+            AND EXISTS (SELECT 1 FROM {$table_photos} p WHERE p.album_id = a.id)" . $gallery_filter . "
             ORDER BY a.synced_at DESC");
         
         ob_start();
         ?>
         <div class="jopg-gallery-header">
-            <h1>Photo Galleries</h1>
+            <h1><?php echo $gallery_name ? esc_html($gallery_name) : 'Photo Galleries'; ?></h1>
             <p>Click an album to browse photos. Watermarked previews are free to view — purchase for full resolution downloads.</p>
         </div>
         <div class="jopg-gallery-grid">

@@ -28,6 +28,7 @@ class JOPG_Admin {
         );
         
         add_submenu_page('jopg', 'Albums', 'Albums', 'manage_options', 'jopg', [$this, 'render_albums_page']);
+        add_submenu_page('jopg', 'Galleries', 'Galleries', 'manage_options', 'jopg-galleries', [$this, 'render_galleries_page']);
         add_submenu_page('jopg', 'Settings', 'Settings', 'manage_options', 'jopg-settings', [$this, 'render_settings_page']);
         add_submenu_page('jopg', 'Client Selections', 'Client Selections', 'manage_options', 'jopg-selections', [$this, 'render_selections_page']);
         add_submenu_page('jopg', 'Lightroom Sync', 'Lightroom Sync', 'manage_options', 'jopg-sync', [$this, 'render_sync_page']);
@@ -214,6 +215,10 @@ class JOPG_Admin {
             (local_photo_count > 0) DESC,
             a.synced_at DESC");
         
+        // Load galleries for dropdown
+        $table_galleries = $wpdb->prefix . 'jopg_galleries';
+        $galleries = $wpdb->get_results("SELECT * FROM $table_galleries ORDER BY name ASC");
+        
         ?>
         <div class="wrap jopg-admin">
             <h1>Photo Albums</h1>
@@ -239,6 +244,7 @@ class JOPG_Admin {
                     <thead>
                         <tr>
                             <th>Album</th>
+                            <th>Gallery</th>
                             <th>Lightroom Photos</th>
                             <th>Imported</th>
                             <th>Last Synced</th>
@@ -257,6 +263,16 @@ class JOPG_Admin {
                                     <?php elseif ($album->local_photo_count > 0): ?>
                                         <span class="dashicons dashicons-yes-alt" style="color:#00a32a;font-size:16px;" title="Imported"></span>
                                     <?php endif; ?>
+                                </td>
+                                <td>
+                                    <select class="jopg-album-gallery-select" data-album-id="<?php echo $album->id; ?>">
+                                        <option value="0">— Unassigned —</option>
+                                        <?php foreach ($galleries as $g): ?>
+                                            <option value="<?php echo $g->id; ?>" <?php selected($album->gallery_id ?? 0, $g->id); ?>>
+                                                <?php echo esc_html($g->name); ?>
+                                            </option>
+                                        <?php endforeach; ?>
+                                    </select>
                                 </td>
                                 <td><?php echo $album->photo_count; ?></td>
                                 <td><?php echo $album->local_photo_count; ?></td>
@@ -294,6 +310,121 @@ class JOPG_Admin {
                 </table>
                 <p id="jopg-no-results" style="display:none;color:#666;padding:10px;">No albums match your search.</p>
             <?php endif; ?>
+        </div>
+        <?php
+    }
+    
+    /**
+     * Render the Galleries management page
+     */
+    public function render_galleries_page() {
+        global $wpdb;
+        $table_galleries = $wpdb->prefix . 'jopg_galleries';
+        $table_albums = $wpdb->prefix . 'jopg_albums';
+        
+        // Handle create gallery
+        if (isset($_POST['jopg_create_gallery'])) {
+            check_admin_referer('jopg_galleries');
+            $name = sanitize_text_field($_POST['gallery_name']);
+            $desc = sanitize_textarea_field($_POST['gallery_desc'] ?? '');
+            $slug = sanitize_title($name);
+            
+            // Ensure unique slug
+            $existing = $wpdb->get_var($wpdb->prepare("SELECT id FROM $table_galleries WHERE slug = %s", $slug));
+            if ($existing) {
+                $slug = $slug . '-' . time();
+            }
+            
+            $wpdb->insert($table_galleries, [
+                'name' => $name,
+                'slug' => $slug,
+                'description' => $desc,
+            ], ['%s', '%s', '%s']);
+            
+            add_action('admin_notices', function() {
+                echo '<div class="notice notice-success is-dismissible"><p>Gallery created.</p></div>';
+            });
+        }
+        
+        // Handle delete gallery
+        if (isset($_GET['action']) && $_GET['action'] === 'delete_gallery' && isset($_GET['gallery_id'])) {
+            $gid = intval($_GET['gallery_id']);
+            $wpdb->delete($table_galleries, ['id' => $gid], ['%d']);
+            // Unassign albums from this gallery
+            $wpdb->update($table_albums, ['gallery_id' => 0], ['gallery_id' => $gid], ['%d'], ['%d']);
+            add_action('admin_notices', function() {
+                echo '<div class="notice notice-success is-dismissible"><p>Gallery deleted. Albums moved to Unassigned.</p></div>';
+            });
+        }
+        
+        $galleries = $wpdb->get_results("SELECT g.*, 
+            (SELECT COUNT(*) FROM {$table_albums} a WHERE a.gallery_id = g.id AND a.status = 'active') as album_count
+            FROM $table_galleries g ORDER BY g.name ASC");
+        
+        ?>
+        <div class="wrap jopg-admin">
+            <h1>Photo Galleries</h1>
+            <p>Create galleries to organize your albums. Use the shortcode <code>[jopg_gallery gallery="slug"]</code> on a page to show only albums from that gallery.</p>
+            
+            <h2>Create New Gallery</h2>
+            <form method="post" action="" style="margin-bottom:30px;">
+                <?php wp_nonce_field('jopg_galleries'); ?>
+                <table class="form-table">
+                    <tr>
+                        <th>Name</th>
+                        <td><input type="text" name="gallery_name" required placeholder="e.g. Weddings, Nature, Portraits" class="regular-text"></td>
+                    </tr>
+                    <tr>
+                        <th>Description</th>
+                        <td><textarea name="gallery_desc" rows="2" cols="50" placeholder="Optional description"></textarea></td>
+                    </tr>
+                </table>
+                <p><button type="submit" name="jopg_create_gallery" class="button button-primary">Create Gallery</button></p>
+            </form>
+            
+            <h2>Your Galleries</h2>
+            <?php if (empty($galleries)): ?>
+                <p>No galleries yet. Create one above to get started.</p>
+            <?php else: ?>
+                <table class="wp-list-table widefat fixed striped">
+                    <thead>
+                        <tr>
+                            <th>Name</th>
+                            <th>Slug</th>
+                            <th>Albums</th>
+                            <th>Shortcode</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <?php foreach ($galleries as $g): ?>
+                            <tr>
+                                <td>
+                                    <strong><?php echo esc_html($g->name); ?></strong>
+                                    <?php if ($g->description): ?>
+                                        <br><span style="color:#666;font-size:12px;"><?php echo esc_html($g->description); ?></span>
+                                    <?php endif; ?>
+                                </td>
+                                <td><code><?php echo esc_html($g->slug); ?></code></td>
+                                <td><?php echo $g->album_count; ?></td>
+                                <td><code>[jopg_gallery gallery="<?php echo esc_attr($g->slug); ?>"]</code></td>
+                                <td>
+                                    <a class="button button-small" 
+                                       href="<?php echo admin_url('admin.php?page=jopg-galleries&action=delete_gallery&gallery_id=' . $g->id); ?>"
+                                       onclick="return confirm('Delete this gallery? Albums will be moved to Unassigned.');"
+                                       style="color:#b32d2e;">
+                                        Delete
+                                    </a>
+                                </td>
+                            </tr>
+                        <?php endforeach; ?>
+                    </tbody>
+                </table>
+            <?php endif; ?>
+            
+            <h3>Default Gallery</h3>
+            <p>Use <code>[jopg_gallery]</code> without a gallery parameter to show <strong>all active albums</strong> that have imported photos, regardless of gallery assignment.</p>
+            <p>To show only unassigned albums, create a gallery called "Unassigned" and assign albums to it.</p>
         </div>
         <?php
     }

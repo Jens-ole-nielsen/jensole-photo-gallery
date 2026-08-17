@@ -28,13 +28,15 @@ class JOPG_DB {
             photo_count int(11) DEFAULT 0,
             cover_asset_id varchar(255) DEFAULT '',
             cover_url varchar(500) DEFAULT '',
+            gallery_id bigint(20) DEFAULT 0,
             synced_at datetime DEFAULT NULL,
             status varchar(20) DEFAULT 'active',
             created_at datetime DEFAULT CURRENT_TIMESTAMP,
             updated_at datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
             PRIMARY KEY (id),
             UNIQUE KEY lightroom_album_id (lightroom_album_id),
-            KEY slug (slug)
+            KEY slug (slug),
+            KEY gallery_id (gallery_id)
         ) $charset;";
         
         // Photos table — individual images
@@ -112,12 +114,31 @@ class JOPG_DB {
             KEY order_id (order_id)
         ) $charset;";
         
+        // Galleries table — user-created gallery groups for organizing albums
+        $table_galleries = $wpdb->prefix . 'jopg_galleries';
+        $sql_galleries = "CREATE TABLE $table_galleries (
+            id bigint(20) NOT NULL AUTO_INCREMENT,
+            name varchar(255) NOT NULL,
+            slug varchar(255) NOT NULL,
+            description text DEFAULT '',
+            created_at datetime DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (id),
+            UNIQUE KEY slug (slug)
+        ) $charset;";
+        
         require_once ABSPATH . 'wp-admin/includes/upgrade.php';
         dbDelta($sql_albums);
         dbDelta($sql_photos);
         dbDelta($sql_selections);
         dbDelta($sql_settings);
         dbDelta($sql_downloads);
+        dbDelta($sql_galleries);
+        
+        // Migration: add gallery_id column to existing albums table if missing
+        $has_gallery_col = $wpdb->get_results("SHOW COLUMNS FROM {$table_albums} LIKE 'gallery_id'");
+        if (empty($has_gallery_col)) {
+            $wpdb->query("ALTER TABLE {$table_albums} ADD COLUMN gallery_id bigint(20) DEFAULT 0 AFTER cover_url, ADD KEY gallery_id (gallery_id)");
+        }
         
         // Default settings
         self::set_setting('watermark_text', 'Jens Ole Photography');

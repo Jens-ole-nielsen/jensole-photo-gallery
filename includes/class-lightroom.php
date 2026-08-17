@@ -29,6 +29,7 @@ class JOPG_Lightroom {
         add_action('wp_ajax_jopg_prewarm_cache', [$this, 'ajax_prewarm_cache']);
         add_action('wp_ajax_jopg_hide_album', [$this, 'ajax_hide_album']);
         add_action('wp_ajax_jopg_restore_album', [$this, 'ajax_restore_album']);
+        add_action('wp_ajax_jopg_assign_gallery', [$this, 'ajax_assign_gallery']);
         
         // OAuth connect flow — admin only
         add_action('admin_post_jopg_lightroom_connect', [$this, 'start_oauth']);
@@ -741,6 +742,29 @@ class JOPG_Lightroom {
      * AJAX: Pre-warm thumbnail cache in batches.
      * Processes N photos per call, JS loops until all done.
      */
+    /**
+     * AJAX: Assign album to a gallery
+     */
+    public function ajax_assign_gallery() {
+        check_ajax_referer('jopg_admin', 'nonce');
+        if (!current_user_can('manage_options')) wp_send_json_error('Permission denied');
+        
+        global $wpdb;
+        $table_albums = $wpdb->prefix . 'jopg_albums';
+        
+        $album_id = intval($_POST['album_id'] ?? 0);
+        $gallery_id = intval($_POST['gallery_id'] ?? 0);
+        
+        if (!$album_id) wp_send_json_error('Invalid album ID');
+        
+        $wpdb->update($table_albums, ['gallery_id' => $gallery_id], ['id' => $album_id], ['%d'], ['%d']);
+        
+        wp_send_json_success([
+            'album_id' => $album_id,
+            'gallery_id' => $gallery_id,
+        ]);
+    }
+    
     /**
      * AJAX: Hide (remove) an album — stops it from syncing and showing in gallery
      */
