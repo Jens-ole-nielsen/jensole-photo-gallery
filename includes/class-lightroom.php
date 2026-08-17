@@ -27,6 +27,7 @@ class JOPG_Lightroom {
         add_action('wp_ajax_jopg_sync_albums', [$this, 'ajax_sync_albums']);
         add_action('wp_ajax_jopg_import_album', [$this, 'ajax_import_album']);
         add_action('wp_ajax_jopg_prewarm_cache', [$this, 'ajax_prewarm_cache']);
+        add_action('wp_ajax_jopg_import_album_batch', [$this, 'ajax_import_album_batch']);
         add_action('wp_ajax_jopg_hide_album', [$this, 'ajax_hide_album']);
         add_action('wp_ajax_jopg_restore_album', [$this, 'ajax_restore_album']);
         add_action('wp_ajax_jopg_assign_gallery', [$this, 'ajax_assign_gallery']);
@@ -518,7 +519,7 @@ class JOPG_Lightroom {
     /**
      * Import all photos from a specific album
      */
-    public function import_album_photos($album_db_id) {
+    public function import_album_photos($album_db_id, $offset = 0, $limit = 0, $skip_prewarm = false) {
         global $wpdb;
         $table_albums = $wpdb->prefix . 'jopg_albums';
         $table_photos = $wpdb->prefix . 'jopg_photos';
@@ -526,8 +527,19 @@ class JOPG_Lightroom {
         $album = $wpdb->get_row($wpdb->prepare("SELECT * FROM $table_albums WHERE id = %d", $album_db_id));
         if (!$album) return new WP_Error('no_album', 'Album not found');
         
+        // Fetch all assets — we need the full list to know the total
+        // The API paginates at 100 per page, so this is just API calls (fast, no image bytes)
         $assets = $this->get_album_assets($album->lightroom_catalog_id, $album->lightroom_album_id);
         if (is_wp_error($assets)) return $assets;
+        
+        $total_assets = count($assets);
+        
+        // Apply offset/limit for batched import
+        if ($limit > 0) {
+            $assets = array_slice($assets, $offset, $limit);
+        } else if ($offset > 0) {
+            $assets = array_slice($assets, $offset);
+        }
         
         $imported = 0;
         $price = floatval(JOPG_DB::get_setting('single_price', '49'));
@@ -578,11 +590,7 @@ class JOPG_Lightroom {
                 $photo_id = $wpdb->insert_id;
             }
             
-            // Create WooCommerce product for this photo
-            // Pre-generate watermarked thumbnail — fetch from Adobe, apply watermark, save to disk
-            // This makes gallery viewing instant (no PHP proxy needed on first view)
-            $this->pregenerate_thumbnail($photo_id, $thumb_url);
-            
+            // Create WooCommerce product for this photo (metadata only, no image fetch)
             if (class_exists('WooCommerce')) {
                 $photo_row = $wpdb->get_row($wpdb->prepare("SELECT * FROM $table_photos WHERE id = %d", $photo_id));
                 do_action('jopg_photo_imported', $photo_id, $photo_row);
@@ -591,9 +599,21 @@ class JOPG_Lightroom {
             $imported++;
         }
         
-        $wpdb->update($table_albums, ['photo_count' => $imported, 'synced_at' => current_time('mysql')], ['id' => $album_db_id]);
+        // Only update album counts when the full import is done (not a partial batch)
+        $is_final_batch = ($limit > 0 && ($offset + $limit >= $total_assets)) || ($limit === 0);
+        if ($is_final_batch) {
+            // Count actual photos in DB for this album (handles re-syncs correctly)
+            $db_count = intval($wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM $table_photos WHERE album_id = %d", $album_db_id)));
+            $wpdb->update($table_albums, ['photo_count' => $db_count, 'synced_at' => current_time('mysql')], ['id' => $album_db_id]);
+        }
         
-        return $imported;
+        return [
+            'imported' => $imported,
+            'total_assets' => $total_assets,
+            'offset' => $offset,
+            'limit' => $limit,
+            'is_final_batch' => $is_final_batch,
+        ];
     }
     
     /**
@@ -735,7 +755,43 @@ class JOPG_Lightroom {
         if (is_wp_error($result)) {
             wp_send_json_error($result->get_error_message());
         }
-        wp_send_json_success(['photos_imported' => $result]);
+        // Backward compat: return integer if not batched
+        if (is_array($result)) {
+            wp_send_json_success(['photos_imported' => $result['imported'], 'total_assets' => $result['total_assets']]);
+        } else {
+            wp_send_json_success(['photos_imported' => $result]);
+        }
+    }
+    
+    /**
+     * AJAX: Import album photos in batches (metadata only, no thumbnail fetching).
+     * JS calls this repeatedly with increasing offset until all photos are imported.
+     * After import is complete, JS auto-triggers pre-warm cache.
+     */
+    public function ajax_import_album_batch() {
+        check_ajax_referer('jopg_admin', 'nonce');
+        if (!current_user_can('manage_options')) wp_die('Forbidden');
+        
+        $album_id = intval($_POST['album_id']);
+        $offset = intval($_POST['offset'] ?? 0);
+        $batch_size = intval($_POST['batch_size'] ?? 100);
+        $batch_size = max(10, min($batch_size, 200)); // 10-200 per batch
+        
+        $result = $this->import_album_photos($album_id, $offset, $batch_size, true);
+        
+        if (is_wp_error($result)) {
+            wp_send_json_error($result->get_error_message());
+        }
+        
+        wp_send_json_success([
+            'imported' => $result['imported'],
+            'total_assets' => $result['total_assets'],
+            'offset' => $offset,
+            'batch_size' => $batch_size,
+            'done' => $offset + $result['imported'],
+            'remaining' => max(0, $result['total_assets'] - ($offset + $result['imported'])),
+            'is_final_batch' => $result['is_final_batch'],
+        ]);
     }
     
     /**

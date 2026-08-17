@@ -33,28 +33,120 @@
         });
     });
 
-    // Import album photos
+    // Import album photos — batched with progress bar + auto pre-warm
     $(document).on('click', '.jopg-import-album', function() {
         var btn = $(this);
         var albumId = btn.data('album-id');
+        var status = $('#jopg-prewarm-status');
+        var originalText = btn.text();
+        
+        // Phase 1: Import metadata in batches
+        var importOffset = 0;
+        var importBatchSize = 100;
+        var totalImported = 0;
+        var totalAssets = 0;
+        
         btn.prop('disabled', true).text('⏳ Importing...');
-
-        $.post(jopg_admin.ajax_url, {
-            action: 'jopg_import_album',
-            nonce: jopg_admin.nonce,
-            album_id: albumId
-        }, function(resp) {
-            if (resp.success) {
-                btn.text('✅ ' + resp.data.photos_imported + ' photos imported!');
-                setTimeout(function() { location.reload(); }, 2000);
-            } else {
-                btn.prop('disabled', false).text('📥 Import Photos');
-                alert('Import failed: ' + (resp.data || 'Unknown error'));
+        status.html('<div style="padding:10px;background:#f0f0f0;border-radius:4px;">Importing photos...</div>');
+        
+        function importBatch() {
+            $.post(jopg_admin.ajax_url, {
+                action: 'jopg_import_album_batch',
+                nonce: jopg_admin.nonce,
+                album_id: albumId,
+                offset: importOffset,
+                batch_size: importBatchSize
+            }, function(resp) {
+                if (!resp.success) {
+                    status.html('<div style="color:red;padding:10px;">Import error: ' + (resp.data || 'Unknown') + '</div>');
+                    btn.prop('disabled', false).text(originalText);
+                    return;
+                }
+                
+                var d = resp.data;
+                totalImported += d.imported;
+                totalAssets = d.total_assets;
+                importOffset = d.done;
+                
+                var pct = d.total_assets > 0 ? Math.round((d.done / d.total_assets) * 100) : 100;
+                var phase1Pct = Math.round(pct * 0.5); // Phase 1 is 50% of total progress
+                var bar = '<div style="background:#ddd;border-radius:4px;height:24px;overflow:hidden;">' +
+                    '<div style="background:#2271b1;height:100%;width:' + phase1Pct + '%;transition:width 0.3s;">' +
+                    '<span style="color:#fff;font-size:12px;line-height:24px;padding-left:8px;">Import: ' + pct + '% (' + d.done + '/' + d.total_assets + ')</span></div></div>';
+                status.html(bar);
+                
+                if (d.remaining > 0) {
+                    // Continue importing next batch
+                    setTimeout(importBatch, 100);
+                } else {
+                    // Import done — start auto pre-warm
+                    status.append('<div style="margin-top:8px;color:green;">✅ ' + totalImported + ' photos imported. Starting cache pre-warm...</div>');
+                    startPrewarm();
+                }
+            }).fail(function() {
+                status.html('<div style="color:red;padding:10px;">Connection error during import.</div>');
+                btn.prop('disabled', false).text(originalText);
+            });
+        }
+        
+        // Phase 2: Auto pre-warm cache after import
+        function startPrewarm() {
+            var pwOffset = 0;
+            var pwBatchSize = 5;
+            var pwCached = 0;
+            var pwFailed = 0;
+            var pwTotal = totalImported;
+            
+            btn.text('🔥 Pre-warming...');
+            
+            function prewarmBatch() {
+                $.post(jopg_admin.ajax_url, {
+                    action: 'jopg_prewarm_cache',
+                    nonce: jopg_admin.nonce,
+                    offset: pwOffset,
+                    batch_size: pwBatchSize,
+                    album_id: albumId
+                }, function(resp) {
+                    if (!resp.success) {
+                        status.append('<div style="color:red;padding:5px;">Pre-warm error: ' + (resp.data || 'Unknown') + '</div>');
+                        btn.prop('disabled', false).text(originalText);
+                        return;
+                    }
+                    
+                    var d = resp.data;
+                    pwCached += d.cached;
+                    pwFailed += d.failed;
+                    pwOffset = d.done;
+                    
+                    // Combined progress: import is 50%, pre-warm is 50%
+                    var pwPct = d.total > 0 ? Math.round((d.done / d.total) * 100) : 100;
+                    var overallPct = 50 + Math.round(pwPct * 0.5);
+                    var bar = '<div style="background:#ddd;border-radius:4px;height:24px;overflow:hidden;">' +
+                        '<div style="background:#2271b1;height:100%;width:' + overallPct + '%;transition:width 0.3s;">' +
+                        '<span style="color:#fff;font-size:12px;line-height:24px;padding-left:8px;">Cache: ' + pwPct + '% (' + d.done + '/' + d.total + ')</span></div></div>';
+                    var msg = '<div style="margin-top:8px;">Pre-warming: ' + d.done + ' of ' + d.total + 
+                        ' — ✅ ' + pwCached + ' cached' + (pwFailed > 0 ? ', ❌ ' + pwFailed + ' failed' : '') + '</div>';
+                    status.html(bar + msg);
+                    
+                    if (d.remaining > 0) {
+                        setTimeout(prewarmBatch, 200);
+                    } else {
+                        btn.prop('disabled', false).text(originalText);
+                        status.append('<div style="margin-top:8px;color:green;font-weight:bold;">✅ Done! ' + 
+                            totalImported + ' photos imported, ' + pwCached + ' images cached. Gallery will load instantly.</div>');
+                        // Update the album row photo count without full reload
+                        setTimeout(function() { location.reload(); }, 3000);
+                    }
+                }).fail(function() {
+                    status.append('<div style="color:red;padding:5px;">Connection error during pre-warm. You can manually pre-warm later.</div>');
+                    btn.prop('disabled', false).text(originalText);
+                });
             }
-        }).fail(function() {
-            btn.prop('disabled', false).text('📥 Import Photos');
-            alert('Connection error during import');
-        });
+            
+            prewarmBatch();
+        }
+        
+        importBatch();
     });
 
 
