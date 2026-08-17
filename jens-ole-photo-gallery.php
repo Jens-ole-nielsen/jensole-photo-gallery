@@ -12,7 +12,7 @@
 
 if (!defined('ABSPATH')) exit;
 
-define('JOPG_VERSION', '1.3.8');
+define('JOPG_VERSION', '1.3.9');
 define('JOPG_PATH', plugin_dir_path(__FILE__));
 define('JOPG_URL', plugin_dir_url(__FILE__));
 define('JOPG_DB_VERSION', '1.0');
@@ -64,6 +64,49 @@ class Jens_Ole_Photo_Gallery {
         
         add_action('init', [$this, 'maybe_flush_rewrite_rules']);
         add_action('init', [$this, 'maybe_clear_watermark_cache']);
+        add_action('init', [$this, 'maybe_migrate_db']);
+    }
+    
+    /**
+     * Run DB migrations on plugin update (not just on activation).
+     * WordPress doesn't fire register_activation_hook on auto-updates,
+     * so new tables and columns added in later versions would never
+     * get created unless we check on every init.
+     */
+    public function maybe_migrate_db() {
+        $migrated_version = get_option('jopg_migrated_version', '0');
+        
+        // Only run if not already migrated to current version
+        if (version_compare($migrated_version, JOPG_VERSION, '>=')) return;
+        
+        global $wpdb;
+        $charset = $wpdb->get_charset_collate();
+        
+        // 1. Create jopg_galleries table if it doesn't exist
+        $table_galleries = $wpdb->prefix . 'jopg_galleries';
+        $sql_galleries = "CREATE TABLE IF NOT EXISTS $table_galleries (
+            id bigint(20) NOT NULL AUTO_INCREMENT,
+            name varchar(255) NOT NULL,
+            slug varchar(255) NOT NULL,
+            description text DEFAULT '',
+            created_at datetime DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (id),
+            UNIQUE KEY slug (slug)
+        ) $charset;";
+        $wpdb->query($sql_galleries);
+        
+        // 2. Add gallery_id column to albums table if missing
+        $table_albums = $wpdb->prefix . 'jopg_albums';
+        $has_gallery_col = $wpdb->get_results("SHOW COLUMNS FROM {$table_albums} LIKE 'gallery_id'");
+        if (empty($has_gallery_col)) {
+            $wpdb->query("ALTER TABLE {$table_albums} ADD COLUMN gallery_id bigint(20) DEFAULT 0 AFTER cover_url, ADD KEY gallery_id (gallery_id)");
+        }
+        
+        // 3. Ensure all existing tables are up to date (runs dbDelta silently)
+        require_once ABSPATH . 'wp-admin/includes/upgrade.php';
+        JOPG_DB::activate();
+        
+        update_option('jopg_migrated_version', JOPG_VERSION);
     }
     
     public function maybe_flush_rewrite_rules() {
